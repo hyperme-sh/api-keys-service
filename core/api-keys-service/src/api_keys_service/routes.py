@@ -1,0 +1,168 @@
+from __future__ import annotations
+
+import secrets
+import uuid
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from api.core.config import settings
+from api.infrastructure.persistence.db_session import get_db_session
+from auth_service.deps import CurrentUser, get_current_tenant
+from controlplane_db.models import ApiKey
+
+from api_keys_service.crypto import hash_secret, verify_secret
+from api_keys_service.schemas import (
+    ApiKeyCreatedResponse,
+    ApiKeyCreateRequest,
+    ApiKeyResponse,
+    InternalValidateRequest,
+    InternalValidateResponse,
+)
+
+router = APIRouter(tags=["api-keys"])
+
+
+async def require_matched_tenant(
+    request: Request,
+    tenant: uuid.UUID = Depends(get_current_tenant),
+) -> uuid.UUID:
+    raw = request.headers.get("X-Tenant-ID")
+    if not raw:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID header is required")
+    try:
+        hdr = uuid.UUID(str(raw))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid X-Tenant-ID") from e
+    if hdr != tenant:
+        raise HTTPException(status_code=403, detail="X-Tenant-ID must match tenant in access token")
+    return tenant
+
+
+def _scopes_list(raw: list | None) -> list[str]:
+    if not raw:
+        return []
+    return [str(x) for x in raw]
+
+
+@router.post("/api-keys", response_model=ApiKeyCreatedResponse, status_code=status.HTTP_201_CREATED)
+async def create_api_key(
+    request: Request,
+    user: CurrentUser,
+    body: ApiKeyCreateRequest,
+    _: uuid.UUID = Depends(require_matched_tenant),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiKeyCreatedResponse:
+    tid = request.state.tenant_id
+    if tid is None:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID required")
+
+    prefix = secrets.token_hex(8)
+    secret = secrets.token_urlsafe(32)
+    full = f"{prefix}.{secret}"
+    row = ApiKey(
+        tenant_id=tid,
+        key_prefix=prefix,
+        secret_hash=hash_secret(secret),
+        name=body.name,
+        scopes=body.scopes or [],
+        created_by_sub=str(user.email) if user.email else None,
+    )
+    session.add(row)
+    await session.flush()
+    await session.refresh(row)
+    return ApiKeyCreatedResponse(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        key_prefix=row.key_prefix,
+        name=row.name,
+        scopes=_scopes_list(row.scopes),
+        created_at=row.created_at.isoformat(),
+        revoked_at=None,
+        secret_plaintext=secret,
+        api_key=full,
+    )
+
+
+@router.get("/api-keys", response_model=list[ApiKeyResponse])
+async def list_api_keys(
+    request: Request,
+    _: uuid.UUID = Depends(require_matched_tenant),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[ApiKeyResponse]:
+    tid = request.state.tenant_id
+    if tid is None:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID required")
+    q = await session.execute(
+        select(ApiKey).where(ApiKey.tenant_id == tid).order_by(ApiKey.created_at.desc())
+    )
+    rows = q.scalars().all()
+    out: list[ApiKeyResponse] = []
+    for row in rows:
+        out.append(
+            ApiKeyResponse(
+                id=row.id,
+                tenant_id=row.tenant_id,
+                key_prefix=row.key_prefix,
+                name=row.name,
+                scopes=_scopes_list(row.scopes),
+                created_at=row.created_at.isoformat(),
+                revoked_at=row.revoked_at.isoformat() if row.revoked_at else None,
+            )
+        )
+    return out
+
+
+@router.delete("/api-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_api_key(
+    key_id: uuid.UUID,
+    request: Request,
+    _: uuid.UUID = Depends(require_matched_tenant),
+    session: AsyncSession = Depends(get_db_session),
+) -> None:
+    tid = request.state.tenant_id
+    if tid is None:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID required")
+    q = await session.execute(
+        select(ApiKey).where(ApiKey.id == key_id, ApiKey.tenant_id == tid)
+    )
+    row = q.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="API key not found")
+    row.revoked_at = datetime.now(UTC)
+    await session.flush()
+
+
+@router.post("/internal/validate", response_model=InternalValidateResponse)
+async def internal_validate(
+    body: InternalValidateRequest,
+    x_internal_token: str | None = Header(None, alias="X-Internal-Token"),
+    session: AsyncSession = Depends(get_db_session),
+) -> InternalValidateResponse:
+    if not x_internal_token or x_internal_token != settings.api_keys_internal_token:
+        raise HTTPException(status_code=401, detail="Invalid internal token")
+
+    raw = body.api_key.strip()
+    if "." not in raw:
+        return InternalValidateResponse(valid=False)
+    prefix, secret = raw.split(".", 1)
+    if not prefix or not secret:
+        return InternalValidateResponse(valid=False)
+
+    q = await session.execute(select(ApiKey).where(ApiKey.key_prefix == prefix))
+    row = q.scalar_one_or_none()
+    if row is None or row.revoked_at is not None:
+        return InternalValidateResponse(valid=False)
+    if row.tenant_id != body.tenant_id:
+        return InternalValidateResponse(valid=False)
+    if not verify_secret(secret, row.secret_hash):
+        return InternalValidateResponse(valid=False)
+
+    return InternalValidateResponse(
+        valid=True,
+        key_id=row.id,
+        tenant_id=row.tenant_id,
+        scopes=_scopes_list(row.scopes),
+    )
