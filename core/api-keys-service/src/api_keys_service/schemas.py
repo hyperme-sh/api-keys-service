@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-KeyMintPurpose = Literal["renter", "service"]
+KeyMintPurpose = Literal["renter", "ir", "service"]
 
 
 class ApiKeyCreateRequest(BaseModel):
@@ -21,8 +21,8 @@ class ApiKeyCreateRequest(BaseModel):
         raw = str(value).strip().lower()
         if raw in {"named service account", "service_account", "service-account"}:
             raw = "service"
-        if raw not in {"renter", "service"}:
-            raise ValueError("purpose must be renter or service")
+        if raw not in {"renter", "ir", "service"}:
+            raise ValueError("purpose must be renter, ir, or service")
         return raw
 
 
