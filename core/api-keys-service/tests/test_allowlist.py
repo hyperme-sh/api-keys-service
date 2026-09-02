@@ -36,6 +36,17 @@ def test_chat_path_does_not_import_allowlist_from_router():
     assert "api_keys" not in source
     assert "portal_controls" not in source
     assert "Keycloak" not in source
+    routes = (
+        Path(__file__).resolve().parents[3]
+        / "products"
+        / "hypermesh-router"
+        / "src"
+        / "hypermesh_router_service"
+        / "routes.py"
+    )
+    route_src = routes.read_text(encoding="utf-8")
+    assert "api_keys_service" not in route_src
+    assert "actor_can_mint_keys" not in route_src
 
 
 def test_refuse_message_is_portal_not_chat():

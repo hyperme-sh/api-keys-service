@@ -72,6 +72,7 @@ async def create_api_key(
         name=body.name,
         scopes=body.scopes or [],
         created_by_sub=str(user.email) if user.email else None,
+        purpose=body.purpose,
     )
     session.add(row)
     await session.flush()
@@ -86,6 +87,7 @@ async def create_api_key(
         revoked_at=None,
         secret_plaintext=secret,
         api_key=full,
+        purpose=row.purpose or "renter",
     )
 
 
@@ -113,6 +115,7 @@ async def list_api_keys(
                 scopes=_scopes_list(row.scopes),
                 created_at=row.created_at.isoformat(),
                 revoked_at=row.revoked_at.isoformat() if row.revoked_at else None,
+                purpose=getattr(row, "purpose", None) or "renter",
             )
         )
     return out
@@ -171,4 +174,5 @@ async def internal_validate(
         key_id=row.id,
         tenant_id=row.tenant_id,
         scopes=_scopes_list(row.scopes),
+        purpose=getattr(row, "purpose", None) or "renter",
     )
