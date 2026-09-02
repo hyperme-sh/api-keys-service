@@ -13,6 +13,7 @@ from api.infrastructure.persistence.db_session import get_db_session
 from auth_service.deps import CurrentUser, get_current_tenant
 from controlplane_db.models import ApiKey
 
+from api_keys_service.allowlist import MINT_REFUSED, actor_can_mint_keys
 from api_keys_service.crypto import hash_secret, verify_secret
 from api_keys_service.schemas import (
     ApiKeyCreatedResponse,
@@ -58,6 +59,8 @@ async def create_api_key(
     tid = request.state.tenant_id
     if tid is None:
         raise HTTPException(status_code=400, detail="X-Tenant-ID required")
+    if not await actor_can_mint_keys(session, tid, user):
+        raise HTTPException(status_code=403, detail=MINT_REFUSED)
 
     prefix = secrets.token_hex(8)
     secret = secrets.token_urlsafe(32)
@@ -119,12 +122,15 @@ async def list_api_keys(
 async def revoke_api_key(
     key_id: uuid.UUID,
     request: Request,
+    user: CurrentUser,
     _: uuid.UUID = Depends(require_matched_tenant),
     session: AsyncSession = Depends(get_db_session),
 ) -> None:
     tid = request.state.tenant_id
     if tid is None:
         raise HTTPException(status_code=400, detail="X-Tenant-ID required")
+    if not await actor_can_mint_keys(session, tid, user):
+        raise HTTPException(status_code=403, detail=MINT_REFUSED)
     q = await session.execute(
         select(ApiKey).where(ApiKey.id == key_id, ApiKey.tenant_id == tid)
     )
