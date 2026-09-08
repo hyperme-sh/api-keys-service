@@ -13,7 +13,12 @@ from api.infrastructure.persistence.db_session import get_db_session
 from auth_service.deps import CurrentUser, get_current_tenant
 from controlplane_db.models import ApiKey
 
-from api_keys_service.allowlist import MINT_REFUSED, actor_can_mint_keys
+from api_keys_service.allowlist import (
+    IR_MINT_REFUSED,
+    MINT_REFUSED,
+    actor_can_mint_keys,
+    actor_controls,
+)
 from api_keys_service.crypto import hash_secret, verify_secret
 from api_keys_service.schemas import (
     ApiKeyCreatedResponse,
@@ -59,7 +64,11 @@ async def create_api_key(
     tid = request.state.tenant_id
     if tid is None:
         raise HTTPException(status_code=400, detail="X-Tenant-ID required")
-    if not await actor_can_mint_keys(session, tid, user):
+    controls = await actor_controls(session, tid, user)
+    if body.purpose == "ir":
+        if not controls.can_use_ir_door:
+            raise HTTPException(status_code=403, detail=IR_MINT_REFUSED)
+    elif not controls.can_mint_keys:
         raise HTTPException(status_code=403, detail=MINT_REFUSED)
 
     prefix = secrets.token_hex(8)

@@ -11,12 +11,15 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.common.portal_controls import evaluate_portal_controls
+from api.common.portal_controls import PortalControls, evaluate_portal_controls
 from auth_service.schemas import AuthMeResponse
 from controlplane_db.models import Group, Role, User, UserGroupMembership
 
 MINT_REFUSED = (
     "API key mint/revoke is limited to org admin or the billing or renter group"
+)
+IR_MINT_REFUSED = (
+    "purpose ir API keys are limited to org admin or the ir group"
 )
 
 
@@ -25,6 +28,13 @@ def mint_allowed(
     groups: list[str] | None,
 ) -> bool:
     return evaluate_portal_controls(roles, groups).can_mint_keys
+
+
+def ir_purpose_mint_allowed(
+    roles: list[str] | None,
+    groups: list[str] | None,
+) -> bool:
+    return evaluate_portal_controls(roles, groups).can_use_ir_door
 
 
 async def _membership_names(
@@ -74,11 +84,11 @@ async def _membership_names(
     return roles, groups
 
 
-async def actor_can_mint_keys(
+async def actor_controls(
     session: AsyncSession,
     tenant_id: uuid.UUID,
     user: AuthMeResponse,
-) -> bool:
+) -> PortalControls:
     roles = list(user.roles)
     groups = list(user.groups)
     try:
@@ -87,4 +97,20 @@ async def actor_can_mint_keys(
         extra_roles, extra_groups = [], []
     roles.extend(extra_roles)
     groups.extend(extra_groups)
-    return mint_allowed(roles, groups)
+    return evaluate_portal_controls(roles, groups)
+
+
+async def actor_can_mint_keys(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    user: AuthMeResponse,
+) -> bool:
+    return (await actor_controls(session, tenant_id, user)).can_mint_keys
+
+
+async def actor_can_use_ir_door(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    user: AuthMeResponse,
+) -> bool:
+    return (await actor_controls(session, tenant_id, user)).can_use_ir_door
