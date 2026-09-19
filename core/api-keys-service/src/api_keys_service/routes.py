@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.common.internal_token import internal_token_matches
 from api.core.config import settings
 from api.infrastructure.persistence.db_session import get_db_session
 from auth_service.deps import CurrentUser, get_current_tenant
@@ -159,7 +160,7 @@ async def internal_validate(
     x_internal_token: str | None = Header(None, alias="X-Internal-Token"),
     session: AsyncSession = Depends(get_db_session),
 ) -> InternalValidateResponse:
-    if not x_internal_token or x_internal_token != settings.api_keys_internal_token:
+    if not internal_token_matches(x_internal_token, settings.api_keys_internal_token):
         raise HTTPException(status_code=401, detail="Invalid internal token")
 
     raw = body.api_key.strip()
