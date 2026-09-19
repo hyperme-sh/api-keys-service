@@ -32,9 +32,9 @@ def test_chat_path_does_not_import_allowlist_from_router():
     chat = (
         Path(__file__).resolve().parents[3]
         / "products"
-        / "hypermesh-router"
+        / "hypermesh-gateway"
         / "src"
-        / "hypermesh_router_service"
+        / "hypermesh_gateway_service"
         / "chat.py"
     )
     source = chat.read_text(encoding="utf-8")
@@ -44,9 +44,9 @@ def test_chat_path_does_not_import_allowlist_from_router():
     routes = (
         Path(__file__).resolve().parents[3]
         / "products"
-        / "hypermesh-router"
+        / "hypermesh-gateway"
         / "src"
-        / "hypermesh_router_service"
+        / "hypermesh_gateway_service"
         / "routes.py"
     )
     route_src = routes.read_text(encoding="utf-8")
