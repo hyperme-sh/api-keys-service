@@ -21,6 +21,10 @@ from api_keys_service.allowlist import (
     actor_controls,
 )
 from api_keys_service.crypto import hash_secret, verify_secret
+from api_keys_service.fingerprint import (
+    publish_renter_key_fingerprint,
+    renter_key_fingerprint,
+)
 from api_keys_service.schemas import (
     ApiKeyCreatedResponse,
     ApiKeyCreateRequest,
@@ -87,6 +91,11 @@ async def create_api_key(
     session.add(row)
     await session.flush()
     await session.refresh(row)
+    publisher = getattr(getattr(request, "app", None), "state", None)
+    hook = getattr(publisher, "renter_key_fingerprint_publisher", None) if publisher else None
+    await publish_renter_key_fingerprint(
+        tid, renter_key_fingerprint(full), publisher=hook
+    )
     return ApiKeyCreatedResponse(
         id=row.id,
         tenant_id=row.tenant_id,
