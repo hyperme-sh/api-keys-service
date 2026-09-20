@@ -169,7 +169,7 @@ async def internal_validate(
     x_internal_token: str | None = Header(None, alias="X-Internal-Token"),
     session: AsyncSession = Depends(get_db_session),
 ) -> InternalValidateResponse:
-    if not internal_token_matches(x_internal_token, settings.api_keys_internal_token):
+    if not internal_token_matches(x_internal_token, settings.usable_api_keys_internal_token()):
         raise HTTPException(status_code=401, detail="Invalid internal token")
 
     raw = body.api_key.strip()
