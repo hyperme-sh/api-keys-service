@@ -26,6 +26,17 @@ class ApiKeyCreateRequest(BaseModel):
         return raw
 
 
+class ApiKeyMappedLease(BaseModel):
+    """Lease this tenant-owned key would hit with no model override."""
+
+    lease_id: uuid.UUID
+    catalog_id: str | None = None
+
+
+class ApiKeyRenameRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=256)
+
+
 class ApiKeyResponse(BaseModel):
     id: uuid.UUID
     tenant_id: uuid.UUID
@@ -35,6 +46,8 @@ class ApiKeyResponse(BaseModel):
     created_at: str
     revoked_at: str | None = None
     purpose: KeyMintPurpose = "renter"
+    last_used_at: str | None = None
+    mapped_lease: ApiKeyMappedLease | None = None
 
 
 class ApiKeyCreatedResponse(ApiKeyResponse):
@@ -58,3 +71,7 @@ class InternalValidateResponse(BaseModel):
     tenant_id: uuid.UUID | None = None
     scopes: list[str] = Field(default_factory=list)
     purpose: KeyMintPurpose | None = None
+
+
+class InternalTouchRequest(BaseModel):
+    key_id: uuid.UUID

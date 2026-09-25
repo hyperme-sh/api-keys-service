@@ -7,6 +7,7 @@ import pytest
 from api_keys_service.fingerprint import (
     publish_renter_key_fingerprint,
     renter_key_fingerprint,
+    revoke_renter_key_fingerprint,
 )
 
 
@@ -32,6 +33,18 @@ async def test_publish_calls_injected_hook():
         tid, "a" * 64, publisher=hook
     )
     assert seen == [(tid, "a" * 64)]
+
+
+@pytest.mark.asyncio
+async def test_revoke_calls_injected_hook():
+    seen: list[tuple[uuid.UUID, str]] = []
+
+    async def hook(tenant_id: uuid.UUID, fingerprint: str) -> None:
+        seen.append((tenant_id, fingerprint))
+
+    tid = uuid.uuid4()
+    await revoke_renter_key_fingerprint(tid, "c" * 64, publisher=hook)
+    assert seen == [(tid, "c" * 64)]
 
 
 @pytest.mark.asyncio
