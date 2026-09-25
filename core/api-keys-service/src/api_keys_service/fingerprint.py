@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 FingerprintPublisher = Callable[[uuid.UUID, str], Awaitable[None]]
 
 
+class FingerprintRevokeError(Exception):
+    """The plane did not unpublish the fingerprint. Revoke must not succeed."""
+
+
 def renter_key_fingerprint(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -34,13 +38,18 @@ async def revoke_renter_key_fingerprint(
     may also be filed on the IR set. Revoke clears the set the door reads.
     """
 
+    if not fingerprint:
+        raise FingerprintRevokeError("fingerprint unpublish failed")
     if publisher is not None:
-        await publisher(tenant_id, fingerprint)
+        try:
+            await publisher(tenant_id, fingerprint)
+        except Exception as exc:
+            raise FingerprintRevokeError("fingerprint unpublish failed") from exc
         return
     base = (os.environ.get("HYPERMESH_CONTROL_PLANE_URL") or "").strip()
     token = (settings.hypermesh_internal_token or "").strip()
-    if not base or not token or not fingerprint:
-        return
+    if not base or not token:
+        raise FingerprintRevokeError("fingerprint unpublish is not configured")
     paths = ["renter-key-fingerprints/revoke"]
     if purpose == "ir":
         paths.append("ir-key-fingerprints/revoke")
@@ -56,9 +65,13 @@ async def revoke_renter_key_fingerprint(
                     json={"fingerprint": fingerprint},
                 )
                 if response.status_code >= 400:
-                    logger.info("renter key fingerprint revoke refused")
-    except Exception:
-        logger.info("renter key fingerprint revoke skipped")
+                    raise FingerprintRevokeError(
+                        f"fingerprint unpublish refused ({response.status_code})"
+                    )
+    except FingerprintRevokeError:
+        raise
+    except Exception as exc:
+        raise FingerprintRevokeError("fingerprint unpublish failed") from exc
 
 
 async def fetch_mapped_lease(tenant_id: uuid.UUID) -> dict[str, str | None] | None:

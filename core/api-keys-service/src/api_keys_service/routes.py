@@ -22,6 +22,7 @@ from api_keys_service.allowlist import (
 )
 from api_keys_service.crypto import hash_secret, verify_secret
 from api_keys_service.fingerprint import (
+    FingerprintRevokeError,
     fetch_mapped_lease,
     publish_renter_key_fingerprint,
     renter_key_fingerprint,
@@ -185,16 +186,22 @@ async def revoke_api_key(
     row = q.scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="API key not found")
-    row.revoked_at = datetime.now(UTC)
     fingerprint = getattr(row, "key_fingerprint", None)
     purpose = getattr(row, "purpose", None) or "renter"
-    await session.flush()
     if fingerprint:
         publisher = getattr(getattr(request, "app", None), "state", None)
         hook = getattr(publisher, "renter_key_fingerprint_revoker", None) if publisher else None
-        await revoke_renter_key_fingerprint(
-            tid, fingerprint, purpose=purpose, publisher=hook
-        )
+        try:
+            await revoke_renter_key_fingerprint(
+                tid, fingerprint, purpose=purpose, publisher=hook
+            )
+        except FingerprintRevokeError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Could not unpublish the API key",
+            ) from exc
+    row.revoked_at = datetime.now(UTC)
+    await session.flush()
 
 
 @router.patch("/api-keys/{key_id}", response_model=ApiKeyResponse)
