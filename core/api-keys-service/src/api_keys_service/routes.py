@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.common.internal_token import internal_token_matches
 from api.core.config import settings
 from api.infrastructure.persistence.db_session import get_db_session
-from auth_service.deps import CurrentUser, get_current_tenant
+from auth_service.deps import CurrentUser, get_access_token_claims, get_current_tenant
 from controlplane_db.models import ApiKey
 
 from api_keys_service.allowlist import (
@@ -19,6 +19,9 @@ from api_keys_service.allowlist import (
     MINT_REFUSED,
     actor_can_mint_keys,
     actor_controls,
+    is_hypermesh_smoke_session,
+    smoke_may_mint,
+    smoke_owns_key,
 )
 from api_keys_service.crypto import hash_secret, verify_secret
 from api_keys_service.fingerprint import (
@@ -104,10 +107,16 @@ async def create_api_key(
     body: ApiKeyCreateRequest,
     _: uuid.UUID = Depends(require_matched_tenant),
     session: AsyncSession = Depends(get_db_session),
+    claims: dict | None = Depends(get_access_token_claims),
 ) -> ApiKeyCreatedResponse:
     tid = request.state.tenant_id
     if tid is None:
         raise HTTPException(status_code=400, detail="X-Tenant-ID required")
+    if not smoke_may_mint(claims, body.purpose, body.scopes or []):
+        raise HTTPException(
+            status_code=403,
+            detail="smoke session may only mint a renter key",
+        )
     controls = await actor_controls(session, tid, user)
     if body.purpose == "ir":
         if not controls.can_use_ir_door:
@@ -153,8 +162,10 @@ async def create_api_key(
 @router.get("/api-keys", response_model=list[ApiKeyResponse])
 async def list_api_keys(
     request: Request,
+    user: CurrentUser,
     _: uuid.UUID = Depends(require_matched_tenant),
     session: AsyncSession = Depends(get_db_session),
+    claims: dict | None = Depends(get_access_token_claims),
 ) -> list[ApiKeyResponse]:
     tid = request.state.tenant_id
     if tid is None:
@@ -163,6 +174,12 @@ async def list_api_keys(
         select(ApiKey).where(ApiKey.tenant_id == tid).order_by(ApiKey.created_at.desc())
     )
     rows = q.scalars().all()
+    if is_hypermesh_smoke_session(claims):
+        rows = [
+            row
+            for row in rows
+            if smoke_owns_key(claims, getattr(row, "created_by_sub", None), user.email)
+        ]
     mapped = await _mapped_lease(request, tid)
     return [_key_response(row, mapped) for row in rows]
 
@@ -174,6 +191,7 @@ async def revoke_api_key(
     user: CurrentUser,
     _: uuid.UUID = Depends(require_matched_tenant),
     session: AsyncSession = Depends(get_db_session),
+    claims: dict | None = Depends(get_access_token_claims),
 ) -> None:
     tid = request.state.tenant_id
     if tid is None:
@@ -184,7 +202,9 @@ async def revoke_api_key(
         select(ApiKey).where(ApiKey.id == key_id, ApiKey.tenant_id == tid)
     )
     row = q.scalar_one_or_none()
-    if row is None:
+    if row is None or not smoke_owns_key(
+        claims, getattr(row, "created_by_sub", None), user.email
+    ):
         raise HTTPException(status_code=404, detail="API key not found")
     fingerprint = getattr(row, "key_fingerprint", None)
     purpose = getattr(row, "purpose", None) or "renter"
@@ -212,6 +232,7 @@ async def rename_api_key(
     body: ApiKeyRenameRequest,
     _: uuid.UUID = Depends(require_matched_tenant),
     session: AsyncSession = Depends(get_db_session),
+    claims: dict | None = Depends(get_access_token_claims),
 ) -> ApiKeyResponse:
     tid = request.state.tenant_id
     if tid is None:
@@ -222,7 +243,9 @@ async def rename_api_key(
         select(ApiKey).where(ApiKey.id == key_id, ApiKey.tenant_id == tid)
     )
     row = q.scalar_one_or_none()
-    if row is None:
+    if row is None or not smoke_owns_key(
+        claims, getattr(row, "created_by_sub", None), user.email
+    ):
         raise HTTPException(status_code=404, detail="API key not found")
     row.name = body.name
     await session.flush()

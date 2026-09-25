@@ -8,7 +8,10 @@ from api_keys_service.allowlist import (
     IR_MINT_REFUSED,
     MINT_REFUSED,
     ir_purpose_mint_allowed,
+    is_hypermesh_smoke_session,
     mint_allowed,
+    smoke_may_mint,
+    smoke_owns_key,
 )
 
 
@@ -128,6 +131,51 @@ async def test_create_route_refuses_ir_purpose_without_ir_grant(monkeypatch):
         )
     assert exc.value.status_code == 403
     assert exc.value.detail == IR_MINT_REFUSED
+
+
+def test_smoke_session_mints_only_its_own_renter_key():
+    smoke = {"hypermesh_smoke": True}
+    assert is_hypermesh_smoke_session(smoke) is True
+    assert is_hypermesh_smoke_session({"hypermesh_smoke": False}) is False
+    assert smoke_may_mint(smoke, "renter", []) is True
+    assert smoke_may_mint(smoke, "ir", []) is False
+    assert smoke_may_mint(smoke, "service", []) is False
+    assert smoke_may_mint(smoke, "renter", ["admin"]) is False
+    assert smoke_may_mint(None, "ir", ["admin"]) is True
+    assert smoke_owns_key(smoke, "hypermesh-smoke@test.hyperme.sh", "Hypermesh-Smoke@test.hyperme.sh")
+    assert smoke_owns_key(smoke, "other@test.hyperme.sh", "hypermesh-smoke@test.hyperme.sh") is False
+    assert smoke_owns_key(None, "other@test.hyperme.sh", "hypermesh-smoke@test.hyperme.sh") is True
+
+
+@pytest.mark.asyncio
+async def test_create_route_refuses_smoke_session_ir_purpose(monkeypatch):
+    from api.common.portal_controls import evaluate_portal_controls
+    from api_keys_service import routes as r
+
+    async def renter(*_a, **_k):
+        return evaluate_portal_controls(["user"], ["renter"])
+
+    monkeypatch.setattr(r, "actor_controls", renter)
+
+    class _Req:
+        state = type("S", (), {"tenant_id": uuid.uuid4()})()
+
+    class _User:
+        roles = ["user"]
+        groups = ["renter"]
+        email = "hypermesh-smoke@test.hyperme.sh"
+
+    with pytest.raises(HTTPException) as exc:
+        await r.create_api_key(
+            request=_Req(),  # type: ignore[arg-type]
+            user=_User(),  # type: ignore[arg-type]
+            body=r.ApiKeyCreateRequest(name="ir-bot", purpose="ir"),
+            _=uuid.uuid4(),
+            session=None,  # type: ignore[arg-type]
+            claims={"hypermesh_smoke": True},
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "smoke session may only mint a renter key"
 
 
 def test_evaluate_matches_mint_allowed():

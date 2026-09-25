@@ -30,6 +30,34 @@ def mint_allowed(
     return evaluate_portal_controls(roles, groups).can_mint_keys
 
 
+def is_hypermesh_smoke_session(claims: dict | None) -> bool:
+    """True only for the test-plane smoke renter session."""
+
+    return isinstance(claims, dict) and claims.get("hypermesh_smoke") is True
+
+
+def smoke_may_mint(claims: dict | None, purpose: str, scopes: list | None) -> bool:
+    """Smoke sessions mint one renter key. Other sessions are not limited here."""
+
+    if not is_hypermesh_smoke_session(claims):
+        return True
+    return purpose == "renter" and not scopes
+
+
+def smoke_owns_key(
+    claims: dict | None,
+    created_by_sub: str | None,
+    actor_email: str | None,
+) -> bool:
+    """Smoke sessions touch only keys they created. Other sessions are not limited here."""
+
+    if not is_hypermesh_smoke_session(claims):
+        return True
+    actor = (actor_email or "").strip().lower()
+    owner = (created_by_sub or "").strip().lower()
+    return bool(actor) and actor == owner
+
+
 def ir_purpose_mint_allowed(
     roles: list[str] | None,
     groups: list[str] | None,
