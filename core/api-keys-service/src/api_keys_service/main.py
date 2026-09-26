@@ -4,6 +4,9 @@ import uvicorn
 
 
 def main() -> None:
+    from api.infrastructure.metrics import start_metrics_server
+
+    start_metrics_server()
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "8000"))
     uvicorn.run(
