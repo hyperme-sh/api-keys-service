@@ -16,7 +16,9 @@ COPY core/lib/controlplane-core ./core/lib/controlplane-core
 COPY core/auth-service ./core/auth-service
 COPY core/tests ./core/tests
 COPY core/api-keys-service ./core/api-keys-service
-RUN uv sync --frozen --no-dev --package api-keys-service
+ARG CONTROLPLANE_SERVICEBUS=0
+RUN uv sync --frozen --no-dev --package api-keys-service \
+ && if [ "$CONTROLPLANE_SERVICEBUS" = "1" ]; then uv pip install --python /app/.venv 'azure-servicebus>=7.12.0'; fi
 ENV PYTHONPATH=/app/core/lib/controlplane-core/src:/app/core/lib/controlplane-db/src:/app/core/events/src:/app/core/models/src:/app/core/auth-service/src:/app/core/api-keys-service/src
 WORKDIR /app/core/api-keys-service
 CMD ["uv", "run", "--project", "/app/core/api-keys-service", "python", "-m", "api_keys_service.main"]
