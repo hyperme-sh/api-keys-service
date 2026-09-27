@@ -11,6 +11,7 @@ from api.core.config import settings
 from api.infrastructure.persistence.db_session import configure_session_maker
 from api.infrastructure.service_cors import add_optional_service_cors
 from api.interfaces.api_controllers.health_endpoint import router as health_router
+from api.interfaces.api_controllers.version_endpoint import router as version_router
 from controlplane_db.session import normalize_database_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -52,6 +53,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(ApiKeysDbMiddleware)
     app.include_router(health_router, prefix="/api/v1")
+    app.include_router(version_router)
     app.include_router(api_keys_router, prefix="/api/v1")
     add_optional_service_cors(app, env_var="API_KEYS_SERVICE_CORS_ORIGINS")
     from api.infrastructure.metrics import install_http_metrics
