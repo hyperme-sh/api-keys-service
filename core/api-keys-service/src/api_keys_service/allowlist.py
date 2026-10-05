@@ -6,7 +6,7 @@ format-only plus a paid ticket. They do not hop here.
 
 from __future__ import annotations
 
-from api.core.config import settings
+from controlplane_identity.security.tenant_session_jwt import is_smoke_session
 
 import uuid
 
@@ -30,12 +30,6 @@ def mint_allowed(
     groups: list[str] | None,
 ) -> bool:
     return evaluate_portal_controls(roles, groups).can_mint_keys
-
-
-def is_smoke_session(claims: dict | None) -> bool:
-    """True only for the test-plane smoke renter session."""
-
-    return isinstance(claims, dict) and claims.get(settings.smoke_session_claim) is True
 
 
 def smoke_may_mint(claims: dict | None, purpose: str, scopes: list | None) -> bool:
