@@ -31,4 +31,4 @@ ARG BUILT_AT=
 ENV GIT_SHA=${GIT_SHA}
 ENV BUILT_AT=${BUILT_AT}
 WORKDIR /app/core/api-keys-service
-CMD ["uv", "run", "--project", "/app/core/api-keys-service", "python", "-m", "api_keys_service.main"]
+CMD ["/app/.venv/bin/python", "-m", "api_keys_service.main"]
