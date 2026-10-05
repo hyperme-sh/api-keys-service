@@ -6,6 +6,8 @@ format-only plus a paid ticket. They do not hop here.
 
 from __future__ import annotations
 
+from api.core.config import settings
+
 import uuid
 
 from sqlalchemy import select
@@ -30,16 +32,16 @@ def mint_allowed(
     return evaluate_portal_controls(roles, groups).can_mint_keys
 
 
-def is_hypermesh_smoke_session(claims: dict | None) -> bool:
+def is_smoke_session(claims: dict | None) -> bool:
     """True only for the test-plane smoke renter session."""
 
-    return isinstance(claims, dict) and claims.get("hypermesh_smoke") is True
+    return isinstance(claims, dict) and claims.get(settings.smoke_session_claim) is True
 
 
 def smoke_may_mint(claims: dict | None, purpose: str, scopes: list | None) -> bool:
     """Smoke sessions mint one renter key. Other sessions are not limited here."""
 
-    if not is_hypermesh_smoke_session(claims):
+    if not is_smoke_session(claims):
         return True
     return purpose == "renter" and not scopes
 
@@ -51,7 +53,7 @@ def smoke_owns_key(
 ) -> bool:
     """Smoke sessions touch only keys they created. Other sessions are not limited here."""
 
-    if not is_hypermesh_smoke_session(claims):
+    if not is_smoke_session(claims):
         return True
     actor = (actor_email or "").strip().lower()
     owner = (created_by_sub or "").strip().lower()

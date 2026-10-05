@@ -8,7 +8,7 @@ from api_keys_service.allowlist import (
     IR_MINT_REFUSED,
     MINT_REFUSED,
     ir_purpose_mint_allowed,
-    is_hypermesh_smoke_session,
+    is_smoke_session,
     mint_allowed,
     smoke_may_mint,
     smoke_owns_key,
@@ -135,8 +135,8 @@ async def test_create_route_refuses_ir_purpose_without_ir_grant(monkeypatch):
 
 def test_smoke_session_mints_only_its_own_renter_key():
     smoke = {"hypermesh_smoke": True}
-    assert is_hypermesh_smoke_session(smoke) is True
-    assert is_hypermesh_smoke_session({"hypermesh_smoke": False}) is False
+    assert is_smoke_session(smoke) is True
+    assert is_smoke_session({"hypermesh_smoke": False}) is False
     assert smoke_may_mint(smoke, "renter", []) is True
     assert smoke_may_mint(smoke, "ir", []) is False
     assert smoke_may_mint(smoke, "service", []) is False
@@ -181,3 +181,14 @@ async def test_create_route_refuses_smoke_session_ir_purpose(monkeypatch):
 def test_evaluate_matches_mint_allowed():
     assert evaluate_portal_controls(["admin"], []).can_mint_keys is True
     assert evaluate_portal_controls(["guest"], []).can_mint_keys is False
+
+
+def test_configured_smoke_marker_keeps_key_restrictions(monkeypatch):
+    from api.core.config import settings
+    monkeypatch.setattr(settings, "smoke_session_claim", "example_smoke")
+    claims = {"example_smoke": True}
+    assert is_smoke_session(claims)
+    assert smoke_may_mint(claims, "renter", [])
+    assert not smoke_may_mint(claims, "host", [])
+    assert not smoke_may_mint(claims, "renter", ["admin"])
+    assert not smoke_owns_key(claims, "another@example.test", "smoke@example.test")
