@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.common.internal_token import internal_token_matches
-from api.core.config import settings
+from controlplane_api.config import settings
 from api.infrastructure.persistence.db_session import get_db_session
 from auth_service.deps import CurrentUser, get_access_token_claims, get_current_tenant
 from controlplane_db.models import ApiKey
