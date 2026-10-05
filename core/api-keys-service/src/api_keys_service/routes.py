@@ -19,7 +19,7 @@ from api_keys_service.allowlist import (
     MINT_REFUSED,
     actor_can_mint_keys,
     actor_controls,
-    is_hypermesh_smoke_session,
+    is_smoke_session,
     smoke_may_mint,
     smoke_owns_key,
 )
@@ -174,7 +174,7 @@ async def list_api_keys(
         select(ApiKey).where(ApiKey.tenant_id == tid).order_by(ApiKey.created_at.desc())
     )
     rows = q.scalars().all()
-    if is_hypermesh_smoke_session(claims):
+    if is_smoke_session(claims):
         rows = [
             row
             for row in rows
