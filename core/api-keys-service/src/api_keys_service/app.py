@@ -5,13 +5,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse
 
-from api.common.exceptions import ForbiddenException, UnauthorizedException
-from api.common.logging import configure_logging
-from api.core.config import settings
+from controlplane_api.exceptions import ForbiddenException, UnauthorizedException
+from controlplane_api.logging import configure_logging
+from controlplane_api.config import settings
 from api.infrastructure.persistence.db_session import configure_session_maker
-from api.infrastructure.service_cors import add_optional_service_cors
-from api.interfaces.api_controllers.health_endpoint import router as health_router
-from api.interfaces.api_controllers.version_endpoint import router as version_router
+from controlplane_api.service_cors import add_optional_service_cors
+from controlplane_api.health import router as health_router
+from controlplane_api.version import router as version_router
 from controlplane_db.session import normalize_database_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -56,7 +56,7 @@ def create_app() -> FastAPI:
     app.include_router(version_router)
     app.include_router(api_keys_router, prefix="/api/v1")
     add_optional_service_cors(app, env_var="API_KEYS_SERVICE_CORS_ORIGINS")
-    from api.infrastructure.metrics import install_http_metrics
+    from controlplane_api.metrics import install_http_metrics
 
     install_http_metrics(app)
     return app

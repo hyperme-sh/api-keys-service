@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 
 import httpx
 
-from api.core.config import settings
+from controlplane_api.config import settings
 
 logger = logging.getLogger(__name__)
 
