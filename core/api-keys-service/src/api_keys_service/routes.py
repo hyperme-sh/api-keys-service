@@ -133,7 +133,7 @@ async def create_api_key(
         secret_hash=hash_secret(secret),
         name=body.name,
         scopes=body.scopes or [],
-        created_by_sub=str(user.email) if user.email else None,
+        created_by_sub=str(user.sub),
         purpose=body.purpose,
         key_fingerprint=renter_key_fingerprint(full),
     )

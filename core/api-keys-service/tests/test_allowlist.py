@@ -257,3 +257,9 @@ async def test_mismatched_marker_cannot_list_or_revoke_another_users_key(monkeyp
     assert exc.value.status_code == 404
     assert other.revoked_at is None
     session.flush.assert_not_awaited()
+
+
+def test_smoke_owns_key_by_immutable_subject_after_email_change():
+    claims = {"smoke_session": True, "sub": "stable-person"}
+    assert smoke_owns_key(claims, "stable-person", "new@example.com")
+    assert not smoke_owns_key(claims, "another-person", "new@example.com")
