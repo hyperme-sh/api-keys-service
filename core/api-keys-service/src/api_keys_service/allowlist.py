@@ -49,6 +49,10 @@ def smoke_owns_key(
 
     if not is_smoke_session(claims):
         return True
+    # New keys bind the immutable subject; retain email matching for old smoke keys.
+    subject = str((claims or {}).get("sub") or "")
+    if subject and created_by_sub == subject:
+        return True
     actor = (actor_email or "").strip().lower()
     owner = (created_by_sub or "").strip().lower()
     return bool(actor) and actor == owner
