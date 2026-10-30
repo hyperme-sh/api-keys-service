@@ -1,0 +1,16 @@
+{
+  "repository": "FyberLabs/api-keys-service",
+  "source_repository": "FyberLabs/panopticon",
+  "source_revision": "2d92d13f38d491c298631b9b9296979c1fbadd19",
+  "selected_paths": [
+    "core/api-keys-service"
+  ],
+  "filtered_history_head": "0d21a209dee7c43fa73b9804010e0dfdcc3a1d27",
+  "retained_files": 15,
+  "inventory_sha256": "e453042b794f1b06246d59c08eda28ef8612b943a422ffc2fe0576a3fd0ef34a",
+  "blob_and_mode_equality_verified": true,
+  "rename_predecessors_followed": false,
+  "standalone_release_verified": false,
+  "cutover_verified": false,
+  "actions_enabled": false
+}
