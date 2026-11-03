@@ -73,16 +73,7 @@ async def _membership_names(
     roles: list[str] = []
     groups: list[str] = []
     row: User | None = None
-    if user.email:
-        q = await session.execute(
-            select(User).where(
-                User.tenant_id == tenant_id,
-                User.email == user.email.lower(),
-                User.deleted_at.is_(None),
-            )
-        )
-        row = q.scalar_one_or_none()
-    if row is None and user.sub:
+    if user.sub:
         q = await session.execute(
             select(User).where(
                 User.tenant_id == tenant_id,
@@ -91,7 +82,7 @@ async def _membership_names(
             )
         )
         row = q.scalar_one_or_none()
-    if row is None:
+    if row is None or row.keycloak_sub != user.sub or not row.is_active:
         return roles, groups
     if row.role_id is not None:
         rq = await session.execute(
