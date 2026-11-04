@@ -32,7 +32,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         lifespan=lifespan,
-        title="Panopticon API Keys Service",
+        title="(s)panopticon API Keys Service",
         description="Tenant-scoped API keys for integrations.",
         version="0.1.0",
     )
