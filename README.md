@@ -22,9 +22,9 @@ references. The gateway source-boundary test requires the owning monorepo and is
 retained there; it is not part of the standalone suite. The historical Dockerfile
 is not a standalone build. Container and consumer integration need separate validation.
 
-The shared-runner workflow runs only on main with read-only contents, pinned actions,
-and exact repository Git credential headers. DEPENDENCY_READ_TOKEN must have
-contents:read for the eight dependencies. Validation runs on the shared local runners;
+Private validation runs on debrunners with pinned actions and read-only contents.
+Normal dependency builds use short-lived repository-scoped GitHub App tokens;
+the fixture lane requires no private Git credentials.
 package publication is described below. Service deployment remains separate.
 
 ## Release channels
@@ -56,8 +56,14 @@ migration errors fail validation rather than skip it. No external database URL i
 accepted. These are database authorization checks using a fixture owner connection,
 not restricted-role/RLS, live token validation or deployed-service acceptance.
 
-Account-closure fences and owner receipts from source #633/#638 remain tracked in
-[adoption issue #13](https://github.com/hyperme-sh/api-keys-service/issues/13).
+The account-lifecycle integration suite transfers all three source tests at
+`2cd00fd9a7ebb950999571a81be7cb0a24d9264e`: mint/close serialization and retry
+inventory, distinct mutation credentials, and permitted tenant/subject-scoped
+purge that preserves other owners. The runtime includes the owner router, mint
+fence and key-validation account check. Existing feature configuration controls
+enforcement; this transfer does not enable a deployed closure workflow.
+`integration/panopticon-transfer-provenance.json` records the source and fixture
+adaptations. Provider and coordinated account-closure acceptance remain separate.
 
 ### Package preparation
 
@@ -99,3 +105,9 @@ publisher independently verifies a real immutable stable baseline and refuses
 qualification snapshots, even if a caller job reports success. Existing valid
 stable records are retained; no release, version change, deployment or human
 approval prerequisite is introduced by this correction.
+
+## License
+
+First-party code is licensed under [Apache-2.0](LICENSE). Bundled dependencies
+retain their own licenses. Wheel and rebuilt-sdist checks verify the SPDX metadata
+and exact Apache license text.
