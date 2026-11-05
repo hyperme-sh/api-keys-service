@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 unset PYTHONPATH UV_NO_SYNC
 uv lock --check
 uv sync --frozen
-uv run --frozen pytest
+uv run --frozen pytest tests integration
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 uv build --out-dir "$scratch/dist"
@@ -14,8 +14,8 @@ uv venv --python 3.13 "$scratch/venv"
 uv pip sync --python "$scratch/venv/bin/python" "$scratch/requirements.txt"
 uv pip uninstall --python "$scratch/venv/bin/python" auth-service controlplane-core controlplane-api controlplane-tenancy controlplane-identity controlplane-db controlplane-events operator-ban-store
 uv pip install --python "$scratch/venv/bin/python" --constraint "$scratch/requirements.txt" "$scratch"/dist/*.whl
-cp -R tests "$scratch/"
-(cd "$scratch" && "$scratch/venv/bin/python" -I -m pytest -c /dev/null -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function tests)
+cp -R tests integration "$scratch/"
+(cd "$scratch" && "$scratch/venv/bin/python" -I -m pytest -c /dev/null -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function tests integration)
 # Rebuild from the sdist; a checkout must not supply omitted package files.
 uv run --frozen python - "$scratch" <<'PY'
 import pathlib, sys, tarfile
@@ -26,7 +26,7 @@ PY
 uv build --wheel "$scratch"/sdist/* --out-dir "$scratch/rebuilt"
 uv run --frozen python scripts/verify_wheel.py "$scratch/rebuilt"
 uv pip install --python "$scratch/venv/bin/python" --no-deps --reinstall "$scratch"/rebuilt/*.whl
-(cd "$scratch" && "$scratch/venv/bin/python" -I -m pytest -c /dev/null -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function tests)
+(cd "$scratch" && "$scratch/venv/bin/python" -I -m pytest -c /dev/null -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function tests integration)
 
 # Retain the exact validated bytes for the release channel; never rebuild them.
 if [[ -n "${RELEASE_ARTIFACT_DIR:-}" ]]; then
