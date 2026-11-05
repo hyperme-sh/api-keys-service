@@ -55,6 +55,8 @@ def create_app() -> FastAPI:
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(version_router)
     app.include_router(api_keys_router, prefix="/api/v1")
+    from api_keys_service.account_lifecycle import router as lifecycle_router
+    app.include_router(lifecycle_router, prefix="/api/v1")
     add_optional_service_cors(app, env_var="API_KEYS_SERVICE_CORS_ORIGINS")
     from controlplane_api.metrics import install_http_metrics
 

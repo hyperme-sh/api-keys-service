@@ -1,0 +1,30 @@
+{
+  "repository": "FyberLabs/panopticon",
+  "commit": "2cd00fd9a7ebb950999571a81be7cb0a24d9264e",
+  "files": [
+    {
+      "source": "core/api-keys-service/tests/test_account_lifecycle.py",
+      "destination": "integration/test_account_lifecycle.py",
+      "sha256": "05a2f9ab1f5ceb9174ca812f83e69a696f0f6696fca0add2efdbb5ddc0ddf364"
+    },
+    {
+      "source": "core/api-keys-service/src/api_keys_service/account_lifecycle.py",
+      "destination": "src/api_keys_service/account_lifecycle.py",
+      "sha256": "798de161899d0c21cc65b495d65d6303a0ddc7f5bcd0023d642370438626bdaf"
+    },
+    {
+      "source": "core/api-keys-service/src/api_keys_service/routes.py",
+      "destination": "src/api_keys_service/routes.py",
+      "sha256": "42efb24b65939b1dd39e07afb14ed743c4672fe3f20818bf2d9283a298311d04"
+    },
+    {
+      "source": "core/api-keys-service/src/api_keys_service/app.py",
+      "destination": "src/api_keys_service/app.py",
+      "sha256": "7e785e4eabb68dc3715c0af9b34fac08769a7b96fc442551df6e94d6d5c1d0d3"
+    }
+  ],
+  "adaptations": [
+    "Reuse the owner integration fixture: disposable PostgreSQL and installed migrations; no monorepo helper.",
+    "Preserve existing application naming; adopt account-lifecycle router registration, mint serialization and validation fence from the same immutable source."
+  ]
+}

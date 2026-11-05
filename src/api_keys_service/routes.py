@@ -14,6 +14,8 @@ from api.infrastructure.persistence.db_session import get_db_session
 from auth_service.deps import CurrentUser, get_access_token_claims, get_current_tenant
 from controlplane_db.models import ApiKey
 
+from api_keys_service.account_lifecycle import require_owner_open
+
 from api_keys_service.allowlist import (
     IR_MINT_REFUSED,
     MINT_REFUSED,
@@ -124,6 +126,7 @@ async def create_api_key(
     elif not controls.can_mint_keys:
         raise HTTPException(status_code=403, detail=MINT_REFUSED)
 
+    await require_owner_open(session, tid, str(user.sub))
     prefix = secrets.token_hex(8)
     secret = secrets.token_urlsafe(32)
     full = f"{prefix}.{secret}"
@@ -294,6 +297,17 @@ async def internal_validate(
         return InternalValidateResponse(valid=False)
     if not verify_secret(secret, row.secret_hash):
         return InternalValidateResponse(valid=False)
+
+    if row.created_by_sub:
+        import asyncio
+        from jwt import InvalidTokenError
+        from controlplane_identity.account_lifecycle import require_open_account
+        try:
+            await asyncio.to_thread(require_open_account, {
+                "sub": row.created_by_sub, "tenant_id": str(row.tenant_id),
+            })
+        except InvalidTokenError:
+            return InternalValidateResponse(valid=False)
 
     return InternalValidateResponse(
         valid=True,
