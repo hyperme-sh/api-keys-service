@@ -29,7 +29,7 @@ dev = [
 packages = ["src/api_keys_service"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/src", "/tests", "/scripts", "/pyproject.toml", "/uv.lock", "/README.md"]
+include = ["/src", "/tests", "/integration", "/scripts", "/pyproject.toml", "/uv.lock", "/README.md"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

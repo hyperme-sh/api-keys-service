@@ -95,6 +95,7 @@ async def _membership_names(
         select(Group.name)
         .join(UserGroupMembership, UserGroupMembership.group_id == Group.id)
         .where(
+            Group.tenant_id == tenant_id,
             UserGroupMembership.tenant_id == tenant_id,
             UserGroupMembership.user_id == row.id,
         )

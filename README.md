@@ -14,7 +14,8 @@ hyperme-sh dependency repositories listed in the shared-runner workflow.
 
 The suite runs from source, a fresh normally installed wheel outside this checkout,
 and a rebuilt sdist wheel. Both wheel payloads must match the runtime source.
-Tests use deterministic dependency doubles; no provider or deployment is exercised.
+Unit tests use deterministic dependency doubles. The package check also runs native
+PostgreSQL membership tests; Docker is required. No live provider or deployment is exercised.
 
 Original tests and Dockerfile remain under core/api-keys-service as integration
 references. The gateway source-boundary test requires the owning monorepo and is
@@ -23,8 +24,8 @@ is not a standalone build. Container and consumer integration need separate vali
 
 The shared-runner workflow runs only on main with read-only contents, pinned actions,
 and exact repository Git credential headers. DEPENDENCY_READ_TOKEN must have
-contents:read for the eight dependencies only. Actions remains disabled until
-scoped access and shared-runner qualification are provisioned. No publishing or deployment.
+contents:read for the eight dependencies. Validation runs on the shared local runners;
+package publication is described below. Service deployment remains separate.
 
 ## Release channels
 
@@ -40,3 +41,22 @@ organization policy may shorten it). Expired evidence fails closed: validate a
 new main revision. The publisher verifies the run, source, workflow and artifact
 digest independently of release metadata. Repository immutable releases must be
 enabled. See the [shared release contract](https://github.com/hyperme-sh/.github/blob/7749591fccd30d46ba9b0adabe82114001c9d0de/actions/release-channel/README.md).
+
+## Membership adoption
+
+The six database cases from Panopticon #680/#684 now run against source, the
+installed wheel and the rebuilt sdist wheel in `scripts/check-package.sh`. They
+verify that reassigned email, unbound/missing subjects, inactive users and foreign
+groups cannot grant API-key authority, while changing email preserves a bound
+subject's existing permissions. Denied actors also exercise the create-key handler
+and leave no key rows. Group lookup constrains both group and membership tenants.
+
+Each test session creates its own PostgreSQL 16 container on a random loopback
+port, waits through the exact TCP migration URL, applies the pinned DB package's
+owner migrations and removes the container and volumes on exit. Docker and
+migration errors fail validation rather than skip it. No external database URL is
+accepted. These are database authorization checks using a fixture owner connection,
+not restricted-role/RLS, live token validation or deployed-service acceptance.
+
+Account-closure fences and owner receipts from source #633/#638 remain tracked in
+[adoption issue #13](https://github.com/hyperme-sh/api-keys-service/issues/13).
