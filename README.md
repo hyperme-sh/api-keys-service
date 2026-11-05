@@ -60,3 +60,19 @@ not restricted-role/RLS, live token validation or deployed-service acceptance.
 
 Account-closure fences and owner receipts from source #633/#638 remain tracked in
 [adoption issue #13](https://github.com/hyperme-sh/api-keys-service/issues/13).
+
+## Test qualification and stable acceptance
+
+GitHub `test-<commit>` prereleases are development snapshots. Their embedded
+package version does not reserve a stable version. Artifact and consumer evidence
+belongs under `releases/qualification`. Owning-package and artifact validation
+remain separate from stable release admission. Future test receipts must carry
+an explicit non-stable classification.
+
+`releases/accepted` and `SPANOPTICON_RELEASE_BASELINE_SHA` are reserved for an
+actual immutable stable GitHub release. The pinned shared guard verifies the live
+release channel, stable tag source and asset digests; a test snapshot cannot
+become accepted through a provenance label. No stable baseline is recorded until
+that release exists. Stable publication remains closed without a valid baseline;
+first stable bootstrap and coordinated release qualification remain separate.
+No stable version, approval prerequisite or deployment is introduced here.
