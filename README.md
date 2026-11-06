@@ -1,113 +1,174 @@
 # API keys service
 
-API key creation, listing and revocation, purpose restrictions, secret hashing
-and renter-key fingerprint propagation. Version 0.1.0. Runtime lives in
-src/api_keys_service; application factory: api_keys_service.app.create_app.
+`api-keys-service` 0.1.0 creates, lists, renames, and revokes tenant-scoped API keys for the Hypermesh control plane. A key is a `prefix.secret` string. The service stores a bcrypt hash of the secret and a SHA-256 fingerprint of the full key, and it is the process the control-plane edge and the Hypermesh gateway call when a request presents an API key. The runtime package is `src/api_keys_service`. Build an app with `api_keys_service.app.create_app`.
 
-## Development
+## Why
 
-Use Python 3.13 and uv 0.11.26 with read access to the eight pinned private
-hyperme-sh dependency repositories listed in the shared-runner workflow.
+Renters call Hypermesh with a key instead of a person's access token. The secret is shown once, at creation, and every later check compares the presented secret with the bcrypt hash. Each key belongs to one tenant and carries a purpose (`renter`, `service`, or `ir`). Org admins, the billing group, and the renter group mint renter and service keys. Org admins and the `ir` group mint `ir` keys. Revocation and account closure hand Hypermesh and the gateway the key's fingerprint so they can stop accepting it. The plaintext secret and the bcrypt hash stay in this service.
 
-    uv sync --frozen
-    bash scripts/check-package.sh
+## How it works
 
-The suite runs from source, a fresh normally installed wheel outside this checkout,
-and a rebuilt sdist wheel. Both wheel payloads must match the runtime source.
-Unit tests use deterministic dependency doubles. The package check also runs native
-PostgreSQL membership tests; Docker is required. No live provider or deployment is exercised.
+The process is a FastAPI application. `python -m api_keys_service.main` serves it with uvicorn (`HOST` defaults to `0.0.0.0`, `PORT` defaults to `8000`) and exposes Prometheus on `METRICS_PORT` (default `9100`). PostgreSQL is reached through `DATABASE_URL` and the `controlplane-db` models. Each request sets the tenant row-level-security context from `X-Tenant-ID` and commits the session when the handler returns.
 
-Original tests and Dockerfile remain under core/api-keys-service as integration
-references. The gateway source-boundary test requires the owning monorepo and is
-retained there; it is not part of the standalone suite. The historical Dockerfile
-is not a standalone build. Container and consumer integration need separate validation.
+User routes require `Authorization: Bearer` plus `X-Tenant-ID`. The header must equal the tenant claim on the access token (`tenant_id`, or `https://spanopticon.dev/tenant_id`). Membership for that tenant and subject is loaded from the database and combined with the token's roles and groups. A smoke session, marked by the `hypermesh_smoke` claim, may mint a renter key with an empty scope list, and may list, rename, and revoke only keys that session created.
 
-Private validation runs on debrunners with pinned actions and read-only contents.
-Normal dependency builds use short-lived repository-scoped GitHub App tokens;
-the fixture lane requires no private Git credentials.
-package publication is described below. Service deployment remains separate.
+On create, the service draws an 8-byte hex prefix and a URL-safe secret, stores `bcrypt(secret)` and `sha256(prefix.secret)`, and returns both the secret portion and the full `prefix.secret` string. Later responses include the prefix, name, scopes, purpose, and timestamps. They omit the secret. List and rename also attach the tenant's mapped lease when Hypermesh reports one: the lease a key for that tenant reaches when the caller does not override the model. Revoked keys omit the lease.
 
-## Release channels
+`POST /api/v1/internal/validate` and `POST /api/v1/internal/touch` authenticate with `X-Internal-Token` (`API_KEYS_INTERNAL_TOKEN`). The token must be set to a private value. An empty value and the published development default are rejected. Validate splits the presented key on the first `.`, checks the prefix, the tenant, the bcrypt hash, and that the key is still active. When the key records a creating subject, validate also requires that account to be open. Touch writes `last_used_at`. The gateway is expected to call touch about once a minute per key.
 
-Main validation retains its exact qualified files in Actions artifacts. It does
-not create GitHub releases or tags. Historical `test-<commit>` prereleases remain
-qualification evidence and do not establish an accepted stable release.
+Account closure, when `ACCOUNT_CLOSURE_ENFORCEMENT_ENABLED=true`, serializes minting with retirement of that subject. The closure routes live under `/api/v1/api-keys/internal/` and require `X-Account-Lifecycle-Token`.
 
-Stable publication requires an explicit `vMAJOR.MINOR.PATCH` tag, the exact
-successful main validation artifact, compatible declared contracts and an actual
-immutable stable baseline. The publisher independently verifies that evidence;
-successful caller jobs alone cannot establish acceptance. Missing evidence and
-first-stable bootstrap remain closed. Package qualification, coordinated consumer
-acceptance and runtime deployment remain separate.
+| Method | Path | Who calls it |
+| --- | --- | --- |
+| `POST` | `/api/v1/api-keys` | Bearer user. Body: `name`, `scopes`, `purpose` (`renter` by default). `201` returns the secret once. |
+| `GET` | `/api/v1/api-keys` | Bearer user. Lists keys for the tenant. |
+| `PATCH` | `/api/v1/api-keys/{key_id}` | Bearer user. Body: `name`. |
+| `DELETE` | `/api/v1/api-keys/{key_id}` | Bearer user. Revokes the key. `204`. |
+| `POST` | `/api/v1/internal/validate` | Edge and gateway. Body: `api_key`, `tenant_id`. |
+| `POST` | `/api/v1/internal/touch` | Gateway. Body: `key_id`. |
+| `POST` | `/api/v1/api-keys/internal/account-status` | Closure guard. Body: `key_id`. |
+| `POST` | `/api/v1/api-keys/internal/close-owner` | Closure operations. Revokes that subject's keys in the tenant and returns ids, fingerprints, and purposes. |
+| `POST` | `/api/v1/api-keys/internal/owner-inventory` | Closure operations. Lists that subject's keys across tenants. |
+| `POST` | `/api/v1/api-keys/internal/purge-owner` | Closure operations. Deletes that subject's keys in the tenant after erasure is authorized. |
+| `GET` | `/api/v1/health/` | Load balancer. `{"status":"Ok"}`. |
+| `GET` | `/version` | Build identity from `GIT_SHA`, `BUILT_AT`, and `SERVICE_NAME`. |
 
-## Membership adoption
+`purpose` accepts `renter`, `ir`, and `service`. The aliases `service_account`, `service-account`, and `named service account` are stored as `service`.
 
-The six database cases from Panopticon #680/#684 now run against source, the
-installed wheel and the rebuilt sdist wheel in `scripts/check-package.sh`. They
-verify that reassigned email, unbound/missing subjects, inactive users and foreign
-groups cannot grant API-key authority, while changing email preserves a bound
-subject's existing permissions. Denied actors also exercise the create-key handler
-and leave no key rows. Group lookup constrains both group and membership tenants.
+## Practical use
 
-Each test session creates its own PostgreSQL 16 container on a random loopback
-port, waits through the exact TCP migration URL, applies the pinned DB package's
-owner migrations and removes the container and volumes on exit. Docker and
-migration errors fail validation rather than skip it. No external database URL is
-accepted. These are database authorization checks using a fixture owner connection,
-not restricted-role/RLS, live token validation or deployed-service acceptance.
+Install Python 3.13 and [uv](https://docs.astral.sh/uv/) 0.11.26. Direct dependencies, pinned in `pyproject.toml` and `uv.lock`, are `controlplane-api` 0.23.0, `auth-service` 0.2.0, `controlplane-core` 0.1.0, `controlplane-db` 0.1.0, `controlplane-events` 0.1.0, `controlplane-identity` 0.15.0, and `bcrypt` 5.0.0. The lock also pulls `controlplane-tenancy` 0.14.0 and `operator-ban-store` 0.1.0 (from `user-service`). `uv sync --frozen` needs read access to those `hyperme-sh` repositories.
 
-The account-lifecycle integration suite transfers all three source tests at
-`2cd00fd9a7ebb950999571a81be7cb0a24d9264e`: mint/close serialization and retry
-inventory, distinct mutation credentials, and permitted tenant/subject-scoped
-purge that preserves other owners. The runtime includes the owner router, mint
-fence and key-validation account check. Existing feature configuration controls
-enforcement; this transfer does not enable a deployed closure workflow.
-`integration/panopticon-transfer-provenance.json` records the source and fixture
-adaptations. Provider and coordinated account-closure acceptance remain separate.
+Start PostgreSQL 16 and apply the `controlplane-db` migrations. The URL below matches the `controlplane-api` development default; use a different password on any shared machine.
 
-### Package preparation
+```sh
+docker run --detach --name api-keys-pg \
+  --publish 127.0.0.1:5432:5432 \
+  --env POSTGRES_USER=controlplane \
+  --env POSTGRES_PASSWORD=controlplane123 \
+  --env POSTGRES_DB=controlplane \
+  postgres:16-alpine
+until docker exec api-keys-pg pg_isready -U controlplane; do sleep 1; done
 
-`bash scripts/check-package.sh --fixtures` runs the existing source, fresh-wheel
-and rebuilt-source-archive consumers without private Git credentials. Fixtures
-are built from the exact clean Git revisions already pinned by this package;
-the manifest records their digests and source provenance. The verifier checks
-root metadata, the complete active lock graph and transitive wheel metadata.
-Explicit private extras and unrecognized conditional pins fail closed.
+uv sync --frozen
+export DATABASE_URL=postgresql+asyncpg://controlplane:controlplane123@127.0.0.1:5432/controlplane
+uv run python -m controlplane_db.migrations upgrade
 
-The read-only pull-request workflow retains tested wheels, source archives and
-an artifact-derived runtime inventory as Actions artifacts. It does not publish
-releases. These are preparation evidence, not an accepted synchronized dependency
-baseline: package version alignment, dependency adoption and comparison against
-a qualified prior baseline remain separate work. Existing owner test boundaries
-and live/provider qualification requirements continue to apply.
+export API_KEYS_INTERNAL_TOKEN="$(openssl rand -hex 32)"
+export HYPERMESH_CONTROL_PLANE_URL=http://127.0.0.1:8010
+export HYPERMESH_INTERNAL_TOKEN="$(openssl rand -hex 32)"
+export KEYCLOAK_ISSUER='http://localhost:8081/realms/controlplane'
+export KEYCLOAK_JWKS_URL='http://localhost:8081/realms/controlplane/protocol/openid-connect/certs'
+export SERVICE_NAME=api-keys-service
+uv run python -m api_keys_service.main
+```
 
-## Test qualification and stable acceptance
+`API_KEYS_SERVICE_CORS_ORIGINS` is a comma-separated origin list. When it is unset, the process allows the local Next.js and Vite origins (`http://localhost:3000`, `http://127.0.0.1:3000`, `http://localhost:5173`, `http://127.0.0.1:5173`). The `controlplane` realm must already exist in the local Keycloak instance. Set the issuer to the exact `iss` value of its tokens and the JWKS URL to an address this service can reach. Access tokens are checked against Keycloak. The development issuer is `http://localhost:8081/realms/controlplane` (`KEYCLOAK_ISSUER`, `KEYCLOAK_JWKS_URL`).
 
-GitHub `test-<commit>` prereleases are development snapshots. Their embedded
-package version does not reserve a stable version. Artifact and consumer evidence
-belongs under `releases/qualification`. Owning-package and artifact validation
-remain separate from stable release admission. Future test receipts must carry
-an explicit non-stable classification.
+Mint a renter key. `secret_plaintext` is the secret portion. `api_key` is the full `prefix.secret` value to store and to send later. Both appear on this response only.
 
-`releases/accepted` and `SPANOPTICON_RELEASE_BASELINE_SHA` are reserved for an
-actual immutable stable GitHub release. The pinned shared guard verifies the live
-release channel, stable tag source and asset digests; a test snapshot cannot
-become accepted through a provenance label. No stable baseline is recorded until
-that release exists. Stable publication remains closed without a valid baseline;
-first stable bootstrap and coordinated release qualification remain separate.
-No stable version, approval prerequisite or deployment is introduced here.
+```sh
+curl -sS -X POST http://127.0.0.1:8000/api/v1/api-keys \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "X-Tenant-ID: $TENANT_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"lab renter","purpose":"renter","scopes":[]}'
+```
 
-### Actions qualification and stable publication
+```json
+{
+  "id": "6f0c1b2e-3a4d-4e5f-8a9b-0c1d2e3f4a5b",
+  "tenant_id": "11111111-2222-4333-8444-555555555555",
+  "key_prefix": "0123456789abcdef",
+  "name": "lab renter",
+  "scopes": [],
+  "created_at": "2026-11-05T22:00:00.000000+00:00",
+  "revoked_at": null,
+  "purpose": "renter",
+  "last_used_at": null,
+  "mapped_lease": null,
+  "secret_plaintext": "the-urlsafe-secret",
+  "api_key": "0123456789abcdef.the-urlsafe-secret"
+}
+```
 
-Main merges and workflow completion do not publish GitHub test releases. Exact
-qualification files remain in Actions artifacts with finite retention. The pinned
-publisher independently verifies a real immutable stable baseline and refuses
-qualification snapshots, even if a caller job reports success. Existing valid
-stable records are retained; no release, version change, deployment or human
-approval prerequisite is introduced by this correction.
+List, rename, and revoke:
+
+```sh
+curl -sS http://127.0.0.1:8000/api/v1/api-keys \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "X-Tenant-ID: $TENANT_ID"
+
+curl -sS -X PATCH http://127.0.0.1:8000/api/v1/api-keys/$KEY_ID \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "X-Tenant-ID: $TENANT_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"lab renter (rotated label)"}'
+
+curl -sS -X DELETE http://127.0.0.1:8000/api/v1/api-keys/$KEY_ID \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "X-Tenant-ID: $TENANT_ID"
+```
+
+The edge and the gateway validate a presented key with the internal token. `valid: false` is an ordinary `200`. A wrong internal token is `401`.
+
+```sh
+curl -sS -X POST http://127.0.0.1:8000/api/v1/internal/validate \
+  -H "X-Internal-Token: $API_KEYS_INTERNAL_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"api_key\":\"$API_KEY\",\"tenant_id\":\"$TENANT_ID\"}"
+```
+
+```json
+{
+  "valid": true,
+  "key_id": "6f0c1b2e-3a4d-4e5f-8a9b-0c1d2e3f4a5b",
+  "tenant_id": "11111111-2222-4333-8444-555555555555",
+  "scopes": [],
+  "purpose": "renter"
+}
+```
+
+Mint still returns the key when `HYPERMESH_CONTROL_PLANE_URL` or `HYPERMESH_INTERNAL_TOKEN` is unset, or when Hypermesh refuses the fingerprint POST. Revoke of a key that has a fingerprint returns `502` with `Could not unpublish the API key` until that unpublish succeeds. Point both variables at the Hypermesh control plane before revoking.
+
+The tree under `core/api-keys-service` is the earlier monorepo layout. Its Dockerfile copies sibling checkouts that this repository does not contain. Run the root package as shown above.
+
+## How Hypermesh uses it
+
+Hypermesh renters mint keys through the control-plane portal. The caller is an org admin, a member of `billing`, or a member of `renter`. An `ir` key uses the same routes with `"purpose":"ir"` and requires an org admin or the `ir` group. The `billing_manager` role counts as `billing`, and the `ir_door` role counts as `ir`. The control-plane edge forwards the browser's access token and `X-Tenant-ID` to this service.
+
+When a renter later calls Hypermesh with that key, the Hypermesh gateway and the control-plane edge both use `controlplane_identity.api_keys_client.validate_api_key_remote`. That client POSTs `/api/v1/internal/validate` with `X-Internal-Token` set to the shared `API_KEYS_INTERNAL_TOKEN`. A truthy `valid` means the secret matched, the key is not revoked, and the tenant on the request is the key's tenant. The gateway then POSTs `/api/v1/internal/touch` so `last_used_at` moves. A completion presents a paid ticket at the gateway. Key administration and this validation call are the traffic that reaches this service.
+
+After a mint, when `HYPERMESH_CONTROL_PLANE_URL` and `HYPERMESH_INTERNAL_TOKEN` are both set, this service POSTs the fingerprint to Hypermesh:
+
+```http
+POST {HYPERMESH_CONTROL_PLANE_URL}/api/v1/hypermesh/internal/renter-key-fingerprints
+X-Internal-Token: {HYPERMESH_INTERNAL_TOKEN}
+X-Tenant-ID: {tenant}
+{"fingerprint":"<sha256 hex of prefix.secret>"}
+```
+
+Revoke POSTs the same fingerprint to `.../renter-key-fingerprints/revoke`. An `ir` key is also removed with `.../ir-key-fingerprints/revoke`. List and rename call `GET .../api/v1/hypermesh/internal/mapped-lease` and copy `lease_id` and `catalog_id` onto keys that are still active.
+
+Closing an account is a separate exchange. With closure enforcement on, the operations caller sends `X-Account-Lifecycle-Token: $ACCOUNT_CLOSURE_OPERATIONS_TOKEN` and `X-Tenant-ID` to `POST /api/v1/api-keys/internal/close-owner` (`subject`, `closed_at`). The handler revokes that subject's keys in the tenant and returns each key's id, fingerprint, and purpose. Hypermesh and the gateway use those fingerprints to drop the key. The body contains neither the secret nor the bcrypt hash. `owner-inventory` lists the same subject's keys across tenants. `purge-owner` deletes the tenant's rows after `ACCOUNT_CLOSURE_GUARD_URL` reports that erasure is allowed and the closed inventory matches. `account-status` answers the guard token (`ACCOUNT_CLOSURE_GUARD_TOKEN`) with whether a single key is blocked.
+
+## Develop and test
+
+From a clean checkout, with read access to the pinned repositories:
+
+```sh
+uv sync --frozen
+bash scripts/check-package.sh
+```
+
+The script runs `tests/` and `integration/` from the checkout, from a freshly installed wheel, and from a wheel rebuilt from the sdist. The wheel must match the runtime source, the `Apache-2.0` SPDX metadata, and the `LICENSE` text. Integration tests need Docker: each session starts PostgreSQL 16 on a loopback port, applies the pinned `controlplane-db` migrations, and removes the container and its volumes on exit. Those tests cover subject-bound membership (a changed email keeps a bound subject's grants; an unbound, missing, or inactive subject, and a group from another tenant, do not) and account closure (mint and close stay serialized, mutation uses a separate credential, and a purge removes only that subject in that tenant).
+
+`bash scripts/check-package.sh --fixtures` runs the same three consumers from the wheels in `tests_artifacts/dependencies`, with no Git credentials. Pull requests use that lane. Pushes to `main` run `scripts/check-package.sh` with repository-scoped read tokens. See [Releasing](docs/releasing.md) for what those workflows keep.
+
+## Release and versioning
+
+The package version is **0.1.0**. The recorded release line in `release-policy.json` is **0.1**. A stable GitHub release is a `vMAJOR.MINOR.PATCH` tag published from the exact artifact `main` already tested. Channel rules, artifact retention, and the accepted-baseline variable are in [Releasing](docs/releasing.md). Compatibility checks are in [Release compatibility](docs/release-policy.md).
 
 ## License
 
-First-party code is licensed under [Apache-2.0](LICENSE). Bundled dependencies
-retain their own licenses. Wheel and rebuilt-sdist checks verify the SPDX metadata
-and exact Apache license text.
+First-party code is [Apache-2.0](LICENSE). Dependencies keep their own licenses. The wheel check compares the SPDX expression and the packaged `LICENSE` bytes with this repository.
