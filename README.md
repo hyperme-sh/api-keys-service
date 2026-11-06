@@ -57,11 +57,13 @@ uv run python -m controlplane_db.migrations upgrade
 export API_KEYS_INTERNAL_TOKEN="$(openssl rand -hex 32)"
 export HYPERMESH_CONTROL_PLANE_URL=http://127.0.0.1:8010
 export HYPERMESH_INTERNAL_TOKEN="$(openssl rand -hex 32)"
+export KEYCLOAK_ISSUER='http://localhost:8081/realms/controlplane'
+export KEYCLOAK_JWKS_URL='http://localhost:8081/realms/controlplane/protocol/openid-connect/certs'
 export SERVICE_NAME=api-keys-service
 uv run python -m api_keys_service.main
 ```
 
-`API_KEYS_SERVICE_CORS_ORIGINS` is a comma-separated origin list. When it is unset, the process allows the local Next.js and Vite origins (`http://localhost:3000`, `http://127.0.0.1:3000`, `http://localhost:5173`, `http://127.0.0.1:5173`). Access tokens are checked against Keycloak. The development issuer is `http://localhost:8081/realms/controlplane` (`KEYCLOAK_ISSUER`, `KEYCLOAK_JWKS_URL`).
+`API_KEYS_SERVICE_CORS_ORIGINS` is a comma-separated origin list. When it is unset, the process allows the local Next.js and Vite origins (`http://localhost:3000`, `http://127.0.0.1:3000`, `http://localhost:5173`, `http://127.0.0.1:5173`). The `controlplane` realm must already exist in the local Keycloak instance. Set the issuer to the exact `iss` value of its tokens and the JWKS URL to an address this service can reach. Access tokens are checked against Keycloak. The development issuer is `http://localhost:8081/realms/controlplane` (`KEYCLOAK_ISSUER`, `KEYCLOAK_JWKS_URL`).
 
 Mint a renter key. `secret_plaintext` is the secret portion. `api_key` is the full `prefix.secret` value to store and to send later. Both appear on this response only.
 
