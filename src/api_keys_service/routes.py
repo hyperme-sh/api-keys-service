@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.common.internal_token import internal_token_matches
 from controlplane_api.config import settings
 from api.infrastructure.persistence.db_session import get_db_session
+from api.infrastructure.persistence.tenant_guc import set_current_tenant_id_guc
 from auth_service.deps import CurrentUser, get_access_token_claims, get_current_tenant
 from controlplane_db.models import ApiKey
 
@@ -289,7 +290,9 @@ async def internal_validate(
     if not prefix or not secret:
         return InternalValidateResponse(valid=False)
 
-    q = await session.execute(select(ApiKey).where(ApiKey.key_prefix == prefix))
+    # The authenticated edge sends the tenant in the validation body.
+    await set_current_tenant_id_guc(session, body.tenant_id)
+    q = await session.execute(select(ApiKey).where(ApiKey.key_prefix == prefix, ApiKey.tenant_id == body.tenant_id))
     row = q.scalar_one_or_none()
     if row is None or row.revoked_at is not None:
         return InternalValidateResponse(valid=False)
