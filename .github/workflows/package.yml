@@ -120,7 +120,7 @@ jobs:
     needs: package
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions: {}
-    runs-on: [self-hosted, linux, x64, debrunner]
+    runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted", "linux", "x64", "debrunner"]') || 'ubuntu-24.04' }}
     steps:
       - name: Verify qualified manifest identity
         env:
