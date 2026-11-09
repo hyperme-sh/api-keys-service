@@ -19,16 +19,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          output=$(mktemp -d "$RUNNER_TEMP/prepared-package.XXXXXX")
-          export RELEASE_ARTIFACT_DIR="$output/dist"
-          export PREPARATION_EVIDENCE_DIR="$output/evidence"
-          echo "PREPARED_OUTPUT=$output" >> "$GITHUB_ENV"
           bash scripts/check-package.sh --fixtures
-      - name: Retain tested preparation bytes
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: prepared-dist
-          path: ${{ env.PREPARED_OUTPUT }}/*
-          if-no-files-found: error
-          retention-days: 30
-          compression-level: 0
