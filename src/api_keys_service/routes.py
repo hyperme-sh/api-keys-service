@@ -377,6 +377,11 @@ async def internal_validate(
         except InvalidTokenError:
             return InternalValidateResponse(valid=False)
 
+    # Edge exchanges use validation without the Gateway's separate touch call.
+    # Record usage only after every credential and owner check succeeds.
+    row.last_used_at = datetime.now(UTC)
+    await session.flush()
+
     return InternalValidateResponse(
         valid=True,
         organization_id=getattr(row,'_api_keys_organization_id',None),
