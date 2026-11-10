@@ -129,13 +129,13 @@ curl -sS -X POST http://127.0.0.1:8000/api/v1/internal/validate \
 }
 ```
 
-Mint still returns the key when `HYPERMESH_CONTROL_PLANE_URL` or `HYPERMESH_INTERNAL_TOKEN` is unset, or when Hypermesh refuses the fingerprint POST. Revoke of a key that has a fingerprint returns `502` with `Could not unpublish the API key` until that unpublish succeeds. Point both variables at the Hypermesh control plane before revoking.
+Mint still returns the key when `HYPERMESH_CONTROL_PLANE_URL` or `HYPERMESH_INTERNAL_TOKEN` is unset, or when Hypermesh refuses the fingerprint POST. Revoke of a key that has a fingerprint returns `502` with `Could not unpublish the API key` until every required fingerprint owner returns a 2xx acknowledgement. Redirects and errors leave the local key unrevoked. Point both variables at the Hypermesh control plane before revoking.
 
 The tree under `core/api-keys-service` is the earlier monorepo layout. Its Dockerfile copies sibling checkouts that this repository does not contain. Run the root package as shown above.
 
 ## How Hypermesh uses it
 
-Hypermesh renters mint keys through the control-plane portal. The caller is an org admin, a member of `billing`, or a member of `renter`. An `ir` key uses the same routes with `"purpose":"ir"` and requires an org admin or the `ir` group. The `billing_manager` role counts as `billing`, and the `ir_door` role counts as `ir`. The control-plane edge forwards the browser's access token and `X-Tenant-ID` to this service.
+Hypermesh renters mint keys through the control-plane portal. The caller is an org admin, a member of `billing`, or a member of `renter`. An `ir` key uses the same routes with `"purpose":"ir"` and requires an org admin or the `ir` group. The `billing_manager` role counts as `billing`, and the `ir_door` role counts as `ir`. The control-plane edge forwards the browser's access token and `X-Tenant-ID` to this service. Rename and revoke load the key within that matched tenant before checking its purpose. IR members can manage their own IR keys, bound to the immutable creating subject; the existing admin authority can manage other keys in that tenant. Renter and service keys retain their renter/billing/admin guard. Smoke sessions remain restricted to their own renter keys.
 
 When a renter later calls Hypermesh with that key, the Hypermesh gateway and the control-plane edge both use `controlplane_identity.api_keys_client.validate_api_key_remote`. That client POSTs `/api/v1/internal/validate` with `X-Internal-Token` set to the shared `API_KEYS_INTERNAL_TOKEN`. A truthy `valid` means the secret matched, the key is not revoked, and the tenant on the request is the key's tenant. The gateway then POSTs `/api/v1/internal/touch` so `last_used_at` moves. A completion presents a paid ticket at the gateway. Key administration and this validation call are the traffic that reaches this service.
 

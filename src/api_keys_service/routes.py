@@ -20,7 +20,6 @@ from api_keys_service.account_lifecycle import require_owner_open
 from api_keys_service.allowlist import (
     IR_MINT_REFUSED,
     MINT_REFUSED,
-    actor_can_mint_keys,
     actor_controls,
     is_smoke_session,
     smoke_may_mint,
@@ -188,6 +187,35 @@ async def list_api_keys(
     return [_key_response(row, mapped) for row in rows]
 
 
+async def _key_for_mutation(
+    key_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    user: CurrentUser,
+    session: AsyncSession,
+    claims: dict | None,
+) -> ApiKey:
+    result = await session.execute(
+        select(ApiKey).where(ApiKey.id == key_id, ApiKey.tenant_id == tenant_id)
+    )
+    row = result.scalar_one_or_none()
+    if row is None or not smoke_owns_key(
+        claims, getattr(row, "created_by_sub", None), user.email
+    ):
+        raise HTTPException(status_code=404, detail="API key not found")
+    controls = await actor_controls(session, tenant_id, user)
+    purpose = getattr(row, "purpose", None) or "renter"
+    if purpose == "ir":
+        if is_smoke_session(claims) or not controls.can_use_ir_door:
+            raise HTTPException(status_code=403, detail=IR_MINT_REFUSED)
+        if not controls.org_admin and (
+            not user.sub or getattr(row, "created_by_sub", None) != str(user.sub)
+        ):
+            raise HTTPException(status_code=404, detail="API key not found")
+    elif purpose not in ("renter", "service") or not controls.can_mint_keys:
+        raise HTTPException(status_code=403, detail=MINT_REFUSED)
+    return row
+
+
 @router.delete("/api-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_api_key(
     key_id: uuid.UUID,
@@ -200,16 +228,7 @@ async def revoke_api_key(
     tid = request.state.tenant_id
     if tid is None:
         raise HTTPException(status_code=400, detail="X-Tenant-ID required")
-    if not await actor_can_mint_keys(session, tid, user):
-        raise HTTPException(status_code=403, detail=MINT_REFUSED)
-    q = await session.execute(
-        select(ApiKey).where(ApiKey.id == key_id, ApiKey.tenant_id == tid)
-    )
-    row = q.scalar_one_or_none()
-    if row is None or not smoke_owns_key(
-        claims, getattr(row, "created_by_sub", None), user.email
-    ):
-        raise HTTPException(status_code=404, detail="API key not found")
+    row = await _key_for_mutation(key_id, tid, user, session, claims)
     fingerprint = getattr(row, "key_fingerprint", None)
     purpose = getattr(row, "purpose", None) or "renter"
     if fingerprint:
@@ -241,16 +260,7 @@ async def rename_api_key(
     tid = request.state.tenant_id
     if tid is None:
         raise HTTPException(status_code=400, detail="X-Tenant-ID required")
-    if not await actor_can_mint_keys(session, tid, user):
-        raise HTTPException(status_code=403, detail=MINT_REFUSED)
-    q = await session.execute(
-        select(ApiKey).where(ApiKey.id == key_id, ApiKey.tenant_id == tid)
-    )
-    row = q.scalar_one_or_none()
-    if row is None or not smoke_owns_key(
-        claims, getattr(row, "created_by_sub", None), user.email
-    ):
-        raise HTTPException(status_code=404, detail="API key not found")
+    row = await _key_for_mutation(key_id, tid, user, session, claims)
     row.name = body.name
     await session.flush()
     return _key_response(row, await _mapped_lease(request, tid))

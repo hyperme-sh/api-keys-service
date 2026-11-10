@@ -64,7 +64,7 @@ async def revoke_renter_key_fingerprint(
                     },
                     json={"fingerprint": fingerprint},
                 )
-                if response.status_code >= 400:
+                if not 200 <= response.status_code < 300:
                     raise FingerprintRevokeError(
                         f"fingerprint unpublish refused ({response.status_code})"
                     )
