@@ -73,7 +73,14 @@ def check():
             stage='mint-renter';renter=mint();stage='mint-ir';ir=mint('ir')
             async def validate(key,tenant=TENANT):
                 return await validate_api_key_remote(base_url=BASE,api_key=key,tenant_id=tenant)
-            stage='sdk-validation'
+            stage='rls-row-visibility'
+            with engine.connect() as connection:
+                assert connection.scalar(text('SELECT count(*) FROM api_keys')) == 0
+                connection.execute(text("SELECT set_config('app.current_tenant_id', :tenant, true)"), {'tenant':str(TENANT)})
+                assert connection.scalar(text('SELECT count(*) FROM api_keys')) == 2
+                connection.execute(text("SELECT set_config('app.current_tenant_id', :tenant, true)"), {'tenant':str(OTHER)})
+                assert connection.scalar(text('SELECT count(*) FROM api_keys')) == 0
+            stage='sdk-validation' 
             assert asyncio.run(validate(renter['api_key']))['key_id']==renter['id']
             assert asyncio.run(validate(renter['api_key'],OTHER)) is None
             assert asyncio.run(validate('invalid.secret')) is None

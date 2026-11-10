@@ -67,7 +67,14 @@ def qualify(image):
         # The fixture code is read on stdin rather than added to the product image.
         result=subprocess.run([*probe,'-i',app,'python','-I','-'],input=(ROOT/'scripts/runtime/probe.py').read_text(),
                               env=environment,capture_output=True,text=True,timeout=120)
-        if result.returncode:raise RuntimeError('Isolated runtime HTTP contract refused; raw responses withheld')
+        if result.returncode:
+            # Only the probe's bounded stage identifier is safe to surface.
+            try:
+                failure=json.loads(result.stderr)
+                stage=failure.get('failure_stage','unknown')
+            except (ValueError,AttributeError):stage='unknown'
+            if not re.fullmatch('[a-z-]{1,64}',stage):stage='unknown'
+            raise RuntimeError('Isolated runtime HTTP contract refused at '+stage)
         observed=json.loads(result.stdout)
     finally:
         for name in reversed(owned):
