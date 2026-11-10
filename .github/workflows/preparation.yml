@@ -26,4 +26,8 @@ jobs:
           python3 scripts/prepare_runtime_context.py "$context"
           revision=$(git rev-parse HEAD)
           docker build -f Dockerfile --label "org.opencontainers.image.revision=$revision" -t "$image" "$context"
-          python3 scripts/qualify_runtime.py --image "$image"
+          python3 scripts/qualify_runtime.py --image "$image" --ownership-file "$RUNNER_TEMP/api-keys-runtime-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.owner"
+      - name: Recover interrupted job-owned runtime fixture
+        if: always()
+        shell: bash
+        run: python3 scripts/qualify_runtime.py --cleanup "$RUNNER_TEMP/api-keys-runtime-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.owner"

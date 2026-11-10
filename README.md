@@ -183,6 +183,8 @@ A synthetic fingerprint owner runs inside that namespace. HTTP checks cover mint
 SDK validation, tenant isolation, membership SQL row visibility, key-use callbacks,
 IR ownership and failed/successful fingerprint acknowledgements. Generated keys,
 JWTs and passwords stay in memory; containers and anonymous volumes are removed.
+SIGTERM unwinds through cleanup. CI also records only the generated owner name in
+a private file and runs an always-step recovery scoped to that owner label.
 This is isolated qualification, not shared TEST deployment or live key acceptance.
 
 To reproduce using credential-free dependency fixtures:

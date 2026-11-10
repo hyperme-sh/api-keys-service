@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import time
 import uuid
@@ -32,7 +33,31 @@ def call(args,*,env=None,timeout=180):
     return result.stdout.strip()
 
 
-def qualify(image):
+def cleanup(prefix):
+    if not re.fullmatch('api-keys-runtime-[a-f0-9]{32}', prefix):
+        raise ValueError('Invalid fixture ownership record')
+    errors=[]
+    for suffix in ('app','bootstrap','postgres'):
+        name=prefix+'-'+suffix
+        try:
+            if call(['docker','ps','-aq','--filter','name=^/'+name+'$',
+                     '--filter','label=api-keys.qualifier.owner='+prefix]):
+                call(['docker','rm','--force','--volumes',name])
+        except Exception as error:errors.append(error)
+    if errors:raise RuntimeError('Owned fixture cleanup incomplete') from None
+
+
+def interrupted(signum, frame):
+    raise SystemExit(128+signum)
+
+
+def qualify(image, ownership_file=None):
+    previous=signal.signal(signal.SIGTERM, interrupted)
+    try:return _qualify(image, ownership_file)
+    finally:signal.signal(signal.SIGTERM, previous)
+
+
+def _qualify(image, ownership_file):
     metadata=json.loads(call(['docker','image','inspect',image]))[0]
     source=metadata['Config'].get('Labels') or {}
     if (source.get('org.opencontainers.image.source')!='https://github.com/hyperme-sh/api-keys-service'
@@ -50,25 +75,26 @@ def qualify(image):
     environment['DATABASE_URL']='postgresql+asyncpg://api_keys_fixture_runtime:'+environment['RUNTIME_DB_PASSWORD']+'@127.0.0.1:5432/postgres'
     names=('DATABASE_URL','FIXTURE_TENANT','FIXTURE_OTHER_TENANT','API_KEYS_INTERNAL_TOKEN','HYPERMESH_INTERNAL_TOKEN',
            'API_KEY_EXCHANGE_JWT_SECRET','HYPERMESH_CONTROL_PLANE_URL','ACCOUNT_CLOSURE_ENFORCEMENT_ENABLED','HOST','PORT')
-    owned=[]
+    if ownership_file is not None:
+        # Names only, never credentials. Exclusive creation prevents replacing a
+        # previous interrupted run's recovery record.
+        with open(ownership_file, 'x', opener=lambda path, flags: os.open(path, flags, 0o600)) as record:
+            record.write(prefix)
     try:
-        owned.append(pg)
-        call(['docker','run','--detach','--name',pg,'--network','none','--env','POSTGRES_PASSWORD','postgres:16-alpine'],env=environment)
+        call(['docker','run','--detach','--name',pg,'--label','api-keys.qualifier.owner='+prefix,'--network','none','--env','POSTGRES_PASSWORD','postgres:16-alpine'],env=environment)
         deadline=time.monotonic()+60
         while True:
             result=subprocess.run(['docker','exec',pg,'pg_isready','-h','127.0.0.1','-U','postgres'],capture_output=True,timeout=10)
             if result.returncode==0:break
             if time.monotonic()>deadline:raise RuntimeError('Owned PostgreSQL TCP readiness timed out')
             time.sleep(.2)
-        owned.append(bootstrap_name)
-        bootstrap=['docker','run','--rm','--name',bootstrap_name,'--tmpfs','/tmp','--network','container:'+pg,'--read-only','--cap-drop','ALL',
+        bootstrap=['docker','run','--rm','--name',bootstrap_name,'--label','api-keys.qualifier.owner='+prefix,'--tmpfs','/tmp','--network','container:'+pg,'--read-only','--cap-drop','ALL',
                    '--security-opt','no-new-privileges:true','--entrypoint','python']
         for name in ('POSTGRES_PASSWORD','RUNTIME_DB_PASSWORD','FIXTURE_TENANT','FIXTURE_OTHER_TENANT'):
             bootstrap+=['--env',name]
         bootstrap+=['--mount','type=bind,src='+str(ROOT/'scripts/runtime/bootstrap.py')+',dst=/fixture.py,readonly',binary,'-I','/fixture.py']
         call(bootstrap,env=environment)
-        owned.append(app)
-        command=['docker','run','--detach','--name',app,'--network','container:'+pg,
+        command=['docker','run','--detach','--name',app,'--label','api-keys.qualifier.owner='+prefix,'--network','container:'+pg,
                  '--read-only','--cap-drop','ALL','--security-opt','no-new-privileges:true','--tmpfs','/tmp']
         for name in names:command+=['--env',name]
         call([*command,binary],env=environment)
@@ -88,14 +114,25 @@ def qualify(image):
             raise RuntimeError('Isolated runtime HTTP contract refused at '+stage+' (HTTP '+str(status if isinstance(status,int) else 'unknown')+')')
         observed=json.loads(result.stdout)
     finally:
-        for name in reversed(owned):
-            if call(['docker','ps','-aq','--filter','name=^/'+name+'$']):
-                call(['docker','rm','--force','--volumes',name])
-    if call(['docker','ps','-aq','--filter','name=^/'+prefix+'-']):raise RuntimeError('Owned fixture cleanup incomplete')
+        cleanup(prefix)
+        if ownership_file is not None:Path(ownership_file).unlink(missing_ok=True)
+    if call(['docker','ps','-aq','--filter','label=api-keys.qualifier.owner='+prefix]):
+        raise RuntimeError('Owned fixture cleanup incomplete')
     return {'image_id':binary,'source_sha':source['org.opencontainers.image.revision'],
             **observed,'fixture_cleanup_verified':True}
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--image',required=True)
-    args=parser.parse_args();print(json.dumps(qualify(args.image),sort_keys=True))
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--image')
+    parser.add_argument('--ownership-file',type=Path)
+    parser.add_argument('--cleanup',type=Path,metavar='OWNERSHIP_FILE')
+    args=parser.parse_args()
+    if args.cleanup:
+        if args.image or args.ownership_file:parser.error('Cleanup is a separate operation')
+        if args.cleanup.exists():
+            cleanup(args.cleanup.read_text())
+            args.cleanup.unlink()
+    else:
+        if not args.image:parser.error('--image is required')
+        print(json.dumps(qualify(args.image,args.ownership_file),sort_keys=True))
