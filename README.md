@@ -212,3 +212,35 @@ tenants. The probe reports this distinction instead of installing a fixture-only
 policy or claiming every table has RLS. The internal touch callback authenticates
 the service token and addresses an opaque key ID; its tenant header carries caller
 context but is not an additional owner authorization check.
+
+### Organization-scoped key owner
+
+`API_KEYS_SCOPED_AUTHORITY_REQUIRED=1` enables the canonical scoped-key contract.
+The deployment lifecycle first runs the explicit User-owned API-key schema
+migration and grants its nonprivileged runtime only key-table operations and the
+private closure inventory function. Application startup never migrates or grants.
+Current User authority is checked over verified HTTPS for every management or
+validation operation. Signed session scope, current fixture generation, active
+membership, organization payment eligibility and key purpose must agree.
+Organization members can manage their own renter keys; organization admins can
+manage that organization's keys and mint IR keys. Arbitrary explicit organization
+scopes are refused. The configured s3r.ch network administrator may manage only
+the declared `oracles:attest` service scope outside an organization.
+
+Deployment provides `API_KEYS_USER_AUTHORITY_URL`,
+`API_KEYS_USER_AUTHORITY_CA_FILE`, `API_KEYS_AUTHORITY_TOKEN_FILE`,
+`API_KEYS_AUTHORITY_GENERATION`, `API_KEYS_AUTHORITY_MANIFEST_SHA256`,
+`HYPERMESH_CONTROL_PLANE_URL`, `API_KEYS_FINGERPRINT_CA_FILE`,
+`API_KEYS_FINGERPRINT_TOKEN_FILE`, and `API_KEYS_GATEWAY_URL`. The two token files
+hold distinct purpose credentials with private file permissions. Startup checks
+User authority, Plane registry and enforced Gateway scope protocol capabilities,
+plus forced tenant RLS and permanent database privileges. These are protocol
+checks, independent of service build revisions. Missing owners fail closed.
+
+Created keys bind to the verified organization or network and subject. Listing
+and mutation cannot use a caller-supplied organization to broaden this scope.
+Validation rechecks current User membership and returns the organization and
+purpose to Gateway, which limits model discovery, paid ticket use and IR receipt
+history to that scope. Existing unbound renter credentials are not upgraded into
+organization authority. Strict fingerprint publication must be acknowledged
+before a new organization key commits; a failed publication rolls back the key.
