@@ -236,3 +236,27 @@ def test_smoke_owns_key_by_immutable_subject_after_email_change():
     claims = {"smoke_session": True, "sub": "stable-person"}
     assert smoke_owns_key(claims, "stable-person", "new@example.com")
     assert not smoke_owns_key(claims, "another-person", "new@example.com")
+
+
+def test_network_session_attestation_boundary(monkeypatch):
+    from uuid import uuid4
+    from api_keys_service.allowlist import network_attestation_key_allowed
+    from controlplane_identity.security.tenant_session_jwt import ISSUER, SPANOPTICON_AUTH
+
+    tenant = uuid4()
+    claims = dict(iss=ISSUER, spanopticon_auth=SPANOPTICON_AUTH, sub="owner", tenant_id=str(tenant),
+                  scope_version=1, scope_kind="network", organization_id=None, network_id="s3r.ch",
+                  realm_access={"roles": ["network:admin"]})
+
+    def allowed(token, purpose="service", scopes=("oracles:attest",)):
+        return network_attestation_key_allowed(token, tenant, "owner", purpose, list(scopes))
+
+    monkeypatch.delenv("API_KEYS_ORACLES_TENANT_ID", raising=False)
+    assert not allowed(claims)
+    monkeypatch.setenv("API_KEYS_ORACLES_TENANT_ID", str(tenant))
+    assert allowed(claims)
+    for field, value in dict(sub="other", tenant_id=str(uuid4()), iss="other", smoke_session=True,
+                             scope_kind="organization", network_id="other", realm_access={}).items():
+        assert not allowed({**claims, field: value})
+    assert not allowed(claims, purpose="renter")
+    assert not allowed(claims, scopes=("oracles:attest", "another"))
