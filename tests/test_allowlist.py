@@ -222,7 +222,7 @@ async def test_mismatched_marker_cannot_list_or_revoke_another_users_key(monkeyp
                              scalar_one_or_none=lambda: other)
     session = SimpleNamespace(execute=AsyncMock(return_value=result), flush=AsyncMock())
     monkeypatch.setattr(routes, "_mapped_lease", AsyncMock(return_value=None))
-    monkeypatch.setattr(routes, "actor_can_mint_keys", AsyncMock(return_value=True))
+    monkeypatch.setattr(routes, "actor_controls", AsyncMock(return_value=evaluate_portal_controls(["admin"], [])))
     listed = await routes.list_api_keys(request, user, tenant_id, session, claims)
     assert [key.id for key in listed] == [own.id]
     with pytest.raises(HTTPException) as exc:
