@@ -18,7 +18,7 @@ def bootstrap():
         connection.execute(text('GRANT SELECT ON ALL TABLES IN SCHEMA public TO api_keys_fixture_runtime'))
         connection.execute(text('GRANT INSERT,UPDATE ON api_keys TO api_keys_fixture_runtime'))
     with Session(engine) as session:
-        session.add_all([Tenant(id=uuid.UUID(os.environ[name]),name='isolated-api-key-runtime',is_active=True)
+        session.add_all([Tenant(id=uuid.UUID(os.environ[name]),name='isolated-api-key-runtime-'+os.environ[name],is_active=True)
                          for name in ('FIXTURE_TENANT','FIXTURE_OTHER_TENANT')])
         session.commit()
     engine.dispose()
