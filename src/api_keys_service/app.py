@@ -16,6 +16,7 @@ from controlplane_db.session import normalize_database_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from api_keys_service.middleware import ApiKeysDbMiddleware
+from api_keys_service.authority import verify_runtime
 from api_keys_service.routes import router as api_keys_router
 
 
@@ -24,11 +25,14 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         configure_logging()
         engine = create_async_engine(normalize_database_url(settings.database_url))
-        maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
-        configure_session_maker(maker)
-        app.state.async_engine = engine
-        yield
-        await engine.dispose()
+        try:
+            await verify_runtime(engine)
+            maker = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+            configure_session_maker(maker)
+            app.state.async_engine = engine
+            yield
+        finally:
+            await engine.dispose()
 
     app = FastAPI(
         lifespan=lifespan,

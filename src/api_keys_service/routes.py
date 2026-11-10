@@ -16,6 +16,7 @@ from auth_service.deps import CurrentUser, get_access_token_claims, get_current_
 from controlplane_db.models import ApiKey
 
 from api_keys_service.account_lifecycle import require_owner_open
+from api_keys_service import authority
 
 from api_keys_service.allowlist import (
     IR_MINT_REFUSED,
@@ -29,6 +30,7 @@ from api_keys_service.allowlist import (
 from api_keys_service.crypto import hash_secret, verify_secret
 from api_keys_service.fingerprint import (
     FingerprintRevokeError,
+    FingerprintPublishError,
     fetch_mapped_lease,
     publish_renter_key_fingerprint,
     renter_key_fingerprint,
@@ -120,15 +122,21 @@ async def create_api_key(
             status_code=403,
             detail="smoke session may only mint a renter key",
         )
-    controls = await actor_controls(session, tid, user)
-    if body.purpose == "ir":
-        if not controls.can_use_ir_door:
-            raise HTTPException(status_code=403, detail=IR_MINT_REFUSED)
-    elif not controls.can_mint_keys and not network_attestation_key_allowed(
-        claims, tid, getattr(user, "sub", None), body.purpose, body.scopes
-    ):
-        raise HTTPException(status_code=403, detail=MINT_REFUSED)
-
+    selection = None
+    if authority.enabled():
+        selection = await authority.authorize(
+            authority.selected(claims, tid, str(user.sub)), 'mint',
+            purpose=body.purpose, scopes=body.scopes or [],
+        )
+    else:
+        controls = await actor_controls(session, tid, user)
+        if body.purpose == "ir":
+            if not controls.can_use_ir_door:
+                raise HTTPException(status_code=403, detail=IR_MINT_REFUSED)
+        elif not controls.can_mint_keys and not network_attestation_key_allowed(
+            claims, tid, getattr(user, "sub", None), body.purpose, body.scopes
+        ):
+            raise HTTPException(status_code=403, detail=MINT_REFUSED)
     await require_owner_open(session, tid, str(user.sub))
     prefix = secrets.token_hex(8)
     secret = secrets.token_urlsafe(32)
@@ -146,11 +154,19 @@ async def create_api_key(
     session.add(row)
     await session.flush()
     await session.refresh(row)
+    if selection is not None:
+        await authority.bind(session,row,selection)
     publisher = getattr(getattr(request, "app", None), "state", None)
     hook = getattr(publisher, "renter_key_fingerprint_publisher", None) if publisher else None
-    await publish_renter_key_fingerprint(
-        tid, renter_key_fingerprint(full), publisher=hook
-    )
+    try:
+        if selection is None or selection.scope_kind=='organization':
+            await publish_renter_key_fingerprint(
+                tid, renter_key_fingerprint(full), publisher=hook,
+                purpose=body.purpose, required=selection is not None,
+            )
+    except FingerprintPublishError:
+        await session.rollback()
+        raise HTTPException(502, 'Could not publish the API key') from None
     return ApiKeyCreatedResponse(
         id=row.id,
         tenant_id=row.tenant_id,
@@ -162,6 +178,7 @@ async def create_api_key(
         secret_plaintext=secret,
         api_key=full,
         purpose=row.purpose or "renter",
+        organization_id=selection.organization_id if selection else None,
     )
 
 
@@ -176,9 +193,14 @@ async def list_api_keys(
     tid = request.state.tenant_id
     if tid is None:
         raise HTTPException(status_code=400, detail="X-Tenant-ID required")
-    q = await session.execute(
-        select(ApiKey).where(ApiKey.tenant_id == tid).order_by(ApiKey.created_at.desc())
-    )
+    selection = None
+    statement = select(ApiKey).where(ApiKey.tenant_id == tid).order_by(ApiKey.created_at.desc())
+    if authority.enabled():
+        selection = await authority.authorize(authority.selected(claims,tid,str(user.sub)), 'read')
+        ids = await authority.key_ids(session,selection)
+        if not ids:return []
+        statement = statement.where(ApiKey.id.in_(ids))
+    q = await session.execute(statement)
     rows = q.scalars().all()
     if is_smoke_session(claims):
         rows = [
@@ -186,8 +208,11 @@ async def list_api_keys(
             for row in rows
             if smoke_owns_key(claims, getattr(row, "created_by_sub", None), user.email)
         ]
-    mapped = await _mapped_lease(request, tid)
-    return [_key_response(row, mapped) for row in rows]
+    mapped = None if selection else await _mapped_lease(request, tid)
+    results = [_key_response(row,mapped) for row in rows]
+    if selection:
+        for item in results:item.organization_id=selection.organization_id
+    return results
 
 
 async def _key_for_mutation(
@@ -196,6 +221,7 @@ async def _key_for_mutation(
     user: CurrentUser,
     session: AsyncSession,
     claims: dict | None,
+    *, request: Request | None = None,
 ) -> ApiKey:
     result = await session.execute(
         select(ApiKey).where(ApiKey.id == key_id, ApiKey.tenant_id == tenant_id)
@@ -205,6 +231,17 @@ async def _key_for_mutation(
         claims, getattr(row, "created_by_sub", None), user.email
     ):
         raise HTTPException(status_code=404, detail="API key not found")
+    if authority.enabled():
+        selection = await authority.authorize(
+            authority.selected(claims,tenant_id,str(user.sub)), 'manage',
+            purpose=row.purpose or 'renter',scopes=row.scopes or [],
+        )
+        if row.id not in await authority.key_ids(session,selection,key_id):
+            raise HTTPException(404,'API key not found')
+        row._api_keys_organization_id=selection.organization_id
+        row._api_keys_scope_kind=selection.scope_kind
+        row._api_keys_skip_fingerprint=(selection.scope_kind=='network' and await authority.key_binding(session,row) is not None)
+        return row
     controls = await actor_controls(session, tenant_id, user)
     purpose = getattr(row, "purpose", None) or "renter"
     if purpose == "ir":
@@ -235,10 +272,10 @@ async def revoke_api_key(
     tid = request.state.tenant_id
     if tid is None:
         raise HTTPException(status_code=400, detail="X-Tenant-ID required")
-    row = await _key_for_mutation(key_id, tid, user, session, claims)
+    row = await _key_for_mutation(key_id, tid, user, session, claims, request=request)
     fingerprint = getattr(row, "key_fingerprint", None)
     purpose = getattr(row, "purpose", None) or "renter"
-    if fingerprint:
+    if fingerprint and not getattr(row,'_api_keys_skip_fingerprint',False):
         publisher = getattr(getattr(request, "app", None), "state", None)
         hook = getattr(publisher, "renter_key_fingerprint_revoker", None) if publisher else None
         try:
@@ -267,10 +304,12 @@ async def rename_api_key(
     tid = request.state.tenant_id
     if tid is None:
         raise HTTPException(status_code=400, detail="X-Tenant-ID required")
-    row = await _key_for_mutation(key_id, tid, user, session, claims)
+    row = await _key_for_mutation(key_id, tid, user, session, claims, request=request)
     row.name = body.name
     await session.flush()
-    return _key_response(row, await _mapped_lease(request, tid))
+    response = _key_response(row, None if authority.enabled() else await _mapped_lease(request, tid))
+    response.organization_id = getattr(row,'_api_keys_organization_id',None)
+    return response
 
 
 @router.post("/internal/touch", status_code=status.HTTP_204_NO_CONTENT)
@@ -278,12 +317,19 @@ async def internal_touch(
     body: InternalTouchRequest,
     x_internal_token: str | None = Header(None, alias="X-Internal-Token"),
     session: AsyncSession = Depends(get_db_session),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
 ) -> None:
     """Stamp last_used_at. The gateway throttles this to one write per minute."""
 
     if not internal_token_matches(x_internal_token, settings.usable_api_keys_internal_token()):
         raise HTTPException(status_code=401, detail="Invalid internal token")
-    q = await session.execute(select(ApiKey).where(ApiKey.id == body.key_id))
+    statement = select(ApiKey).where(ApiKey.id == body.key_id)
+    if authority.enabled() or isinstance(x_tenant_id,str):
+        try:tenant = uuid.UUID(x_tenant_id)
+        except (ValueError,TypeError,AttributeError):raise HTTPException(400,'X-Tenant-ID required') from None
+        await set_current_tenant_id_guc(session,tenant)
+        statement = statement.where(ApiKey.tenant_id == tenant)
+    q = await session.execute(statement)
     row = q.scalar_one_or_none()
     if row is None or row.revoked_at is not None:
         return
@@ -318,6 +364,8 @@ async def internal_validate(
     if not verify_secret(secret, row.secret_hash):
         return InternalValidateResponse(valid=False)
 
+    if authority.enabled() and not await authority.key_use(session,row):
+        return InternalValidateResponse(valid=False)
     if row.created_by_sub:
         import asyncio
         from jwt import InvalidTokenError
@@ -331,6 +379,8 @@ async def internal_validate(
 
     return InternalValidateResponse(
         valid=True,
+        organization_id=getattr(row,'_api_keys_organization_id',None),
+        scope_kind=getattr(row,'_api_keys_scope_kind',None),
         key_id=row.id,
         tenant_id=row.tenant_id,
         scopes=_scopes_list(row.scopes),

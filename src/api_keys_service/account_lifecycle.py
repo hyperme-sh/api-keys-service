@@ -15,6 +15,7 @@ from controlplane_identity.account_lifecycle import (
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text, update
+from api_keys_service import authority
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -187,16 +188,21 @@ async def owner_inventory(
         )
     except RuntimeError:
         raise HTTPException(503, "Account closure permit unavailable") from None
-    rows = list(
-
-            await session.scalars(
-                select(ApiKey)
-                .where(ApiKey.created_by_sub == body.subject)
-                .order_by(ApiKey.tenant_id, ApiKey.id)
-                .limit(100_001)
-            )
-
-    )
+    if authority.enabled():
+        rows = (await session.execute(text(
+            "SELECT id,tenant_id,key_fingerprint,purpose FROM api_key_subject_inventory(:subject) LIMIT 100001"
+        ),{'subject':body.subject})).all()
+    else:
+        rows = list(
+    
+                await session.scalars(
+                    select(ApiKey)
+                    .where(ApiKey.created_by_sub == body.subject)
+                    .order_by(ApiKey.tenant_id, ApiKey.id)
+                    .limit(100_001)
+                )
+    
+        )
     if len(rows) > 100_000:
         raise HTTPException(503, "Account key inventory exceeds limit")
     return {

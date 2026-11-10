@@ -41,6 +41,7 @@ class ApiKeyResponse(BaseModel):
     id: uuid.UUID
     tenant_id: uuid.UUID
     key_prefix: str
+    organization_id: uuid.UUID | None = None
     name: str | None
     scopes: list[str]
     created_at: str
@@ -71,6 +72,8 @@ class InternalValidateResponse(BaseModel):
     tenant_id: uuid.UUID | None = None
     scopes: list[str] = Field(default_factory=list)
     purpose: KeyMintPurpose | None = None
+    organization_id: uuid.UUID | None = None
+    scope_kind: Literal["organization", "network"] | None = None
 
 
 class InternalTouchRequest(BaseModel):
