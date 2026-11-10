@@ -209,13 +209,16 @@ async def verify_runtime(engine):
     except (OSError,httpx.HTTPError,ValueError,AttributeError):
         raise RuntimeError('Plane key registry contract unavailable') from None
     gateway=os.environ.get('API_KEYS_GATEWAY_URL','').rstrip('/')
-    if not gateway:raise RuntimeError('Gateway scope contract URL required')
+    target=urlsplit(gateway)
+    if target.scheme!='https' or not target.hostname or target.username or target.password or target.path or target.query or target.fragment:
+        raise RuntimeError('Verified Gateway scope HTTPS origin required')
     try:
-        async with httpx.AsyncClient(timeout=3,trust_env=False,follow_redirects=False) as client:
+        context=ssl.create_default_context(cafile=os.environ.get('API_KEYS_GATEWAY_CA_FILE') or None)
+        async with httpx.AsyncClient(timeout=3,trust_env=False,follow_redirects=False,verify=context) as client:
             response=await client.get(gateway+'/api/v1/hypermesh-gateway/key-scope-capabilities')
         if response.status_code!=200 or (type(response.json().get('api_key_scope_version')) is not int or response.json().get('api_key_scope_version')!=1 or response.json().get('require_key_scope') is not True):
             raise ValueError()
-    except (httpx.HTTPError,ValueError,AttributeError):
+    except (OSError,httpx.HTTPError,ValueError,AttributeError):
         raise RuntimeError('Gateway organization key scope contract unavailable') from None
     async with engine.connect() as db:
         flags=(await db.execute(text('SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user'))).one()

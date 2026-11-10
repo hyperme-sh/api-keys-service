@@ -170,7 +170,7 @@ async def test_touch_requires_verified_tenant_context(scoped,monkeypatch):
 @pytest.mark.parametrize('failed_owner',['user','plane','gateway'])
 async def test_writer_activation_requires_protocol_capability_not_peer_build(scoped,monkeypatch,failed_owner):
     monkeypatch.setenv('HYPERMESH_CONTROL_PLANE_URL','https://plane.test')
-    monkeypatch.setenv('API_KEYS_GATEWAY_URL','http://gateway.test')
+    monkeypatch.setenv('API_KEYS_GATEWAY_URL','https://gateway.test')
     calls=[]
     def handler(request):
         calls.append(request.url.host)
@@ -198,3 +198,42 @@ async def test_required_fingerprint_origin_accepts_one_trailing_slash(scoped,mon
     install_transport(monkeypatch,handler)
     await fingerprint.publish_renter_key_fingerprint(scoped.tenant,'isolated.raw',required=True)
     assert called==['https://plane.test/api/v1/hypermesh/internal/renter-key-fingerprints']
+
+
+@pytest.mark.parametrize('bound',[False,True])
+async def test_network_revoke_acknowledges_pre_binding_fingerprint(scoped,monkeypatch,bound):
+    row=SimpleNamespace(id=uuid.uuid4(),tenant_id=scoped.tenant,created_by_sub=scoped.subject,
+        purpose='service',scopes=['oracles:attest'],key_fingerprint='c'*64,revoked_at=None)
+    selection=replace(scoped.selection,organization_id=None,network_id='s3r.ch',scope_kind='network')
+    claims={**scoped.claims,'organization_id':None,'network_id':'s3r.ch','scope_kind':'network'}
+    monkeypatch.setattr(authority,'authorize',AsyncMock(return_value=selection))
+    monkeypatch.setattr(authority,'key_ids',AsyncMock(return_value=[row.id]))
+    monkeypatch.setattr(authority,'key_binding',AsyncMock(return_value={'key_id':row.id} if bound else None))
+    revoke=AsyncMock(side_effect=fingerprint.FingerprintRevokeError())
+    monkeypatch.setattr(routes,'revoke_renter_key_fingerprint',revoke)
+    session=SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda:row)),flush=AsyncMock())
+    user=SimpleNamespace(sub=scoped.subject,email='isolated@example.invalid')
+    request=SimpleNamespace(state=SimpleNamespace(tenant_id=scoped.tenant),app=SimpleNamespace(state=SimpleNamespace()))
+    if bound:
+        await routes.revoke_api_key(row.id,request,user,scoped.tenant,session,claims)
+        revoke.assert_not_awaited();assert row.revoked_at is not None
+    else:
+        with pytest.raises(HTTPException) as error:
+            await routes.revoke_api_key(row.id,request,user,scoped.tenant,session,claims)
+        assert error.value.status_code==502 and row.revoked_at is None
+        revoke.side_effect=None
+        await routes.revoke_api_key(row.id,request,user,scoped.tenant,session,claims)
+        assert row.revoked_at is not None and revoke.await_count==2
+
+
+async def test_gateway_capability_refuses_plaintext_before_contact(scoped,monkeypatch):
+    monkeypatch.setenv('HYPERMESH_CONTROL_PLANE_URL','https://plane.test')
+    monkeypatch.setenv('API_KEYS_GATEWAY_URL','http://gateway.test')
+    calls=[]
+    def handler(request):
+        calls.append(request.url.host)
+        return httpx.Response(200,json={'api_key_authority_version':1,'api_key_registry_version':1})
+    install_transport(monkeypatch,handler)
+    with pytest.raises(RuntimeError,match='Gateway scope HTTPS'):
+        await authority.verify_runtime(SimpleNamespace(connect=AsyncMock()))
+    assert calls==['owner.test','plane.test']

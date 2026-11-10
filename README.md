@@ -231,7 +231,8 @@ Deployment provides `API_KEYS_USER_AUTHORITY_URL`,
 `API_KEYS_USER_AUTHORITY_CA_FILE`, `API_KEYS_AUTHORITY_TOKEN_FILE`,
 `API_KEYS_AUTHORITY_GENERATION`, `API_KEYS_AUTHORITY_MANIFEST_SHA256`,
 `HYPERMESH_CONTROL_PLANE_URL`, `API_KEYS_FINGERPRINT_CA_FILE`,
-`API_KEYS_FINGERPRINT_TOKEN_FILE`, and `API_KEYS_GATEWAY_URL`. The two token files
+`API_KEYS_FINGERPRINT_TOKEN_FILE`, `API_KEYS_GATEWAY_URL`, and
+`API_KEYS_GATEWAY_CA_FILE`. All capability origins require verified HTTPS. The two token files
 hold distinct purpose credentials with private file permissions. Startup checks
 User authority, Plane registry and enforced Gateway scope protocol capabilities,
 plus forced tenant RLS and permanent database privileges. These are protocol

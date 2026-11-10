@@ -240,6 +240,7 @@ async def _key_for_mutation(
             raise HTTPException(404,'API key not found')
         row._api_keys_organization_id=selection.organization_id
         row._api_keys_scope_kind=selection.scope_kind
+        row._api_keys_skip_fingerprint=(selection.scope_kind=='network' and await authority.key_binding(session,row) is not None)
         return row
     controls = await actor_controls(session, tenant_id, user)
     purpose = getattr(row, "purpose", None) or "renter"
@@ -274,7 +275,7 @@ async def revoke_api_key(
     row = await _key_for_mutation(key_id, tid, user, session, claims, request=request)
     fingerprint = getattr(row, "key_fingerprint", None)
     purpose = getattr(row, "purpose", None) or "renter"
-    if fingerprint and getattr(row,'_api_keys_scope_kind',None)!='network':
+    if fingerprint and not getattr(row,'_api_keys_skip_fingerprint',False):
         publisher = getattr(getattr(request, "app", None), "state", None)
         hook = getattr(publisher, "renter_key_fingerprint_revoker", None) if publisher else None
         try:
