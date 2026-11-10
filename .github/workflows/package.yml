@@ -83,7 +83,7 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           source="api-keys-ci:$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           docker build -f Dockerfile --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$source" "$RELEASE_ARTIFACT_DIR"
-          docker run --rm --network none --read-only --cap-drop ALL --entrypoint python "$source" -Ic 'from api_keys_service.app import app; assert "/api/v1/internal/validate" in app.openapi()["paths"]'
+          python3 scripts/qualify_runtime.py --image "$source" --ownership-file "$RUNNER_TEMP/api-keys-runtime-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.owner"
       - name: Publish qualified runtime to GHCR
         id: registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -110,6 +110,9 @@ jobs:
             test "$(docker buildx imagetools inspect "$repo:test" --format '{{.Manifest.Digest}}')" = "$digest"
           fi
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Recover interrupted job-owned runtime fixture
+        if: always()
+        run: python3 scripts/qualify_runtime.py --cleanup "$RUNNER_TEMP/api-keys-runtime-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.owner"
       - name: Clean job-owned runtime and package bytes
         if: always()
         run: |

@@ -40,6 +40,7 @@ fi
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 uv run --frozen "${run_options[@]}" pytest tests integration --junitxml="$scratch/source.xml"
+.venv/bin/python -m pytest -q tests_tools
 uv build --out-dir "$scratch/dist"
 uv run --frozen "${run_options[@]}" python scripts/verify_wheel.py "$scratch/dist"
 uv export --frozen "${export_options[@]}" --no-emit-project --format requirements-txt --output-file "$scratch/requirements.txt" >/dev/null

@@ -8,18 +8,18 @@ This page is how artifacts move. The compatibility manifest and the steps that p
 
 | Workflow | When it runs | What it leaves behind |
 | --- | --- | --- |
-| `.github/workflows/package.yml` | Push to `main`, and manual dispatch on `main` | `tested-dist`: the wheel and sdist that `scripts/check-package.sh` just built. Retained 90 days. No Git tag and no GitHub release. |
-| `.github/workflows/preparation.yml` | Pull request | `prepared-dist`: the same check with `--fixtures`, plus the exported contract and junit files. Retained 30 days. Preparation evidence, not a release. |
+| `.github/workflows/package.yml` | Push to `main`, and manual dispatch on `main` | Qualified OCI runtime with the exact tested wheel and sdist at `/qualified/tested-dist.zip`. Main advances the moving `runtime:test` channel; no Actions package archive, Git tag or GitHub release. |
+| `.github/workflows/preparation.yml` | Pull request | Credential-free source, wheel, rebuilt sdist and isolated HTTP runtime checks. Temporary bytes and the local image are removed; no artifact upload or publication. |
 | `.github/workflows/release-admission.yml` | Any tag push, and manual dispatch | Admission through `hyperme-sh/spanopticon` `component-release` at line `0.1`, using `SPANOPTICON_RELEASE_BASELINE_SHA`. |
 | `.github/workflows/release.yml` | Tag push matching `v*` | Admission, then publication of the already tested `package.yml` artifact. |
 
 On a public repository those jobs run on `ubuntu-24.04`. On a private repository they select `[self-hosted, linux, x64, debrunner]`. `package.yml` requests a short-lived read token for `auth-service`, `controlplane-api`, `controlplane-core`, `controlplane-db`, `controlplane-events`, `controlplane-identity`, `controlplane-tenancy`, and `user-service`. The preparation lane installs the fixture wheels and does not receive that token.
 
-The publish job in `release.yml` grants `contents: write` and `actions: read` only to the pinned action `hyperme-sh/.github/actions/release-channel`. That job does not check out this repository or install its packages. It publishes the exact `tested-dist` bytes from a successful `package.yml` run. Admission has to succeed for that job to run.
+The publish job in `release.yml` grants `contents: write` and `actions: read` only to the pinned action `hyperme-sh/.github/actions/release-channel`. That job does not check out this repository or install its packages. It retrieves the exact tested distribution bytes from the qualified GHCR image produced by a successful `package.yml` run. Admission has to succeed for that job to run.
 
 ## Development snapshots
 
-A GitHub prerelease tagged `test-<commit>` is a development snapshot. The package version embedded in the snapshot does not reserve a stable version. Keep artifact and consumer evidence for those snapshots under `releases/qualification`, and mark the receipt as non-stable. `package.yml` and `preparation.yml` do not create those prereleases. Their files stay in the Actions artifacts above.
+A GitHub prerelease tagged `test-<commit>` is a development snapshot. The package version embedded in the snapshot does not reserve a stable version. Keep artifact and consumer evidence for those snapshots under `releases/qualification`, and mark the receipt as non-stable. `package.yml` and `preparation.yml` do not create those prereleases. Qualified distribution bytes travel inside the main OCI image; PR temporary files are removed.
 
 ## Stable publication
 
@@ -28,7 +28,7 @@ A stable release is an immutable, non-draft GitHub release tagged `vMAJOR.MINOR.
 The publisher checks all of the following itself:
 
 - the tag and the commit it peels to
-- the exact `tested-dist` artifact from the successful main validation
+- the exact tested distribution bundle in the qualified OCI image from successful main validation
 - compatible declared contracts
 - an accepted baseline at `releases/accepted`, selected with the repository variable `SPANOPTICON_RELEASE_BASELINE_SHA` (the full 40-character commit SHA of that baseline)
 

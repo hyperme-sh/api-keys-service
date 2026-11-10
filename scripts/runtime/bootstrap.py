@@ -1,0 +1,39 @@
+"""Bootstrap only the network-isolated, disposable owner database."""
+import os
+import uuid
+from sqlalchemy import create_engine,text
+from sqlalchemy.orm import Session
+from controlplane_db.migrations import upgrade
+from controlplane_db.models import Tenant,Group,Role
+
+def bootstrap():
+    url='postgresql+psycopg://postgres:'+os.environ['POSTGRES_PASSWORD']+'@127.0.0.1:5432/postgres'
+    upgrade(url)
+    engine=create_engine(url)
+    password=os.environ['RUNTIME_DB_PASSWORD']
+    assert len(password)==32 and all(c in '0123456789abcdef' for c in password)
+    with engine.begin() as connection:
+        connection.execute(text("CREATE ROLE api_keys_fixture_runtime LOGIN PASSWORD '"+password+"' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE"))
+        connection.execute(text('GRANT USAGE ON SCHEMA public TO api_keys_fixture_runtime'))
+        connection.execute(text('GRANT SELECT ON ALL TABLES IN SCHEMA public TO api_keys_fixture_runtime'))
+        connection.execute(text('GRANT INSERT,UPDATE ON api_keys TO api_keys_fixture_runtime'))
+    with Session(engine) as session:
+        session.add_all([Tenant(id=uuid.UUID(os.environ[name]),name='isolated-api-key-runtime-'+os.environ[name],is_active=True)
+                         for name in ('FIXTURE_TENANT','FIXTURE_OTHER_TENANT')])
+        session.commit()
+        for name in ('FIXTURE_TENANT','FIXTURE_OTHER_TENANT'):
+            role=Role(tenant_id=uuid.UUID(os.environ[name]),name='runtime-rls-probe',permissions=[])
+            session.add(role);session.flush()
+            session.add(Group(tenant_id=uuid.UUID(os.environ[name]),name='runtime-rls-probe',role_id=role.id))
+        session.commit()
+    engine.dispose()
+    print('Disposable owner schema and runtime role ready')
+
+if __name__ == '__main__':
+    try:bootstrap()
+    except Exception as error:
+        import json,sys,traceback
+        frames=traceback.extract_tb(error.__traceback__)
+        print(json.dumps({'exception_type':type(error).__name__,
+                          'frames':[str(frame.lineno)+':'+frame.name for frame in frames]}),file=sys.stderr)
+        raise SystemExit(1) from None
