@@ -22,7 +22,7 @@ FingerprintPublisher = Callable[[uuid.UUID, str], Awaitable[None]]
 
 def _client_options(base):
     if not authority.enabled():return {'timeout':5.0}
-    url=urlsplit(base)
+    url=urlsplit(base.rstrip('/'))
     if url.scheme!='https' or not url.hostname or url.username or url.password or url.path or url.query or url.fragment:
         raise ValueError('Verified fingerprint owner HTTPS origin required')
     return dict(timeout=5.0,trust_env=False,follow_redirects=False,

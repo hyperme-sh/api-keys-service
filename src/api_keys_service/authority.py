@@ -123,7 +123,16 @@ async def key_ids(session,selection,key_id=None):
     if not selection.org_admin or selection.scope_kind=='network':
         conditions.append('owner_sub=:subject');params['subject']=selection.subject
     if key_id is not None:conditions.append('key_id=:key');params['key']=key_id
-    rows=await session.execute(text('SELECT key_id FROM api_key_authority_bindings WHERE '+' AND '.join(conditions)+' LIMIT 100001'),params)
+    query='SELECT key_id FROM api_key_authority_bindings WHERE '+' AND '.join(conditions)
+    # Retain revocation/listing for the exact pre-binding relay credentials
+    # which key_use accepts. This cannot upgrade an enrollment/renter key.
+    if (selection.scope_kind=='network' and selection.organization_id is None
+            and selection.network_id=='s3r.ch'
+            and str(selection.tenant_id)==os.environ.get('API_KEYS_ORACLES_TENANT_ID')):
+        params['subject']=selection.subject
+        query += " UNION SELECT id AS key_id FROM api_keys k WHERE tenant_id=:tenant AND created_by_sub=:subject AND purpose='service' AND scopes::jsonb='[\"oracles:attest\"]'::jsonb AND NOT EXISTS (SELECT FROM api_key_authority_bindings b WHERE b.key_id=k.id AND b.tenant_id=k.tenant_id)"
+        if key_id is not None:query+=' AND id=:key'
+    rows=await session.execute(text(query+' LIMIT 100001'),params)
     values=list(rows.scalars())
     if len(values)>100000:raise HTTPException(503,'Key inventory exceeds limit')
     return values

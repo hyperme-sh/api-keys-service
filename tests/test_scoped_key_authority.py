@@ -188,3 +188,13 @@ async def test_writer_activation_requires_protocol_capability_not_peer_build(sco
     engine=SimpleNamespace(connect=AsyncMock())
     with pytest.raises(RuntimeError):await authority.verify_runtime(engine)
     engine.connect.assert_not_called()
+
+
+async def test_required_fingerprint_origin_accepts_one_trailing_slash(scoped,monkeypatch):
+    monkeypatch.setenv('HYPERMESH_CONTROL_PLANE_URL','https://plane.test/')
+    called=[]
+    def handler(request):
+        called.append(str(request.url));return httpx.Response(201,json={})
+    install_transport(monkeypatch,handler)
+    await fingerprint.publish_renter_key_fingerprint(scoped.tenant,'isolated.raw',required=True)
+    assert called==['https://plane.test/api/v1/hypermesh/internal/renter-key-fingerprints']
