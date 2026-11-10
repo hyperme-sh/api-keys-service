@@ -19,4 +19,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash scripts/check-package.sh --fixtures
+          context=$(mktemp -d "$RUNNER_TEMP/api-keys-runtime.XXXXXX")
+          image="api-keys-preparation:$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          trap 'docker image rm "$image" >/dev/null 2>&1 || true; rm -rf "$context"' EXIT
+          RELEASE_ARTIFACT_DIR="$context" bash scripts/check-package.sh --fixtures
+          python3 scripts/prepare_runtime_context.py "$context"
+          revision=$(git rev-parse HEAD)
+          docker build -f Dockerfile --label "org.opencontainers.image.revision=$revision" -t "$image" "$context"
+          python3 scripts/qualify_runtime.py --image "$image"

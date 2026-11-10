@@ -172,3 +172,31 @@ The package version is **0.1.0**. The recorded release line in `release-policy.j
 ## License
 
 First-party code is [Apache-2.0](LICENSE). Dependencies keep their own licenses. The wheel check compares the SPDX expression and the packaged `LICENSE` bytes with this repository.
+
+## Isolated runtime qualification
+
+PR and main CI run the normal container entrypoint against a disposable PostgreSQL
+schema under a non-superuser, non-RLS-bypassing role. The checked-in lifecycle
+(`scripts/qualify_runtime.py` and `scripts/runtime/`) owns random container names,
+publishes no host ports and shares only a network-none container's loopback.
+A synthetic fingerprint owner runs inside that namespace. HTTP checks cover mint,
+SDK validation, tenant isolation, actual SQL row visibility, key-use callbacks,
+IR ownership and failed/successful fingerprint acknowledgements. Generated keys,
+JWTs and passwords stay in memory; containers and anonymous volumes are removed.
+This is isolated qualification, not shared TEST deployment or live key acceptance.
+
+To reproduce using credential-free dependency fixtures:
+
+```sh
+context=$(mktemp -d)
+RELEASE_ARTIFACT_DIR="$context" bash scripts/check-package.sh --fixtures
+python3 scripts/prepare_runtime_context.py "$context"
+docker build -f Dockerfile --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" -t api-keys-local:qualification "$context"
+python3 scripts/qualify_runtime.py --image api-keys-local:qualification
+docker image rm api-keys-local:qualification
+rm -rf "$context"
+```
+
+Use a clean checkout so the reported revision identifies the qualified source.
+Running TEST services follow the moving test channel; image digests in receipts
+identify tested bytes and do not pin service deployments.
