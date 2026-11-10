@@ -18,7 +18,17 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def call(args,*,env=None,timeout=180):
     result=subprocess.run(args,env=env,capture_output=True,text=True,timeout=timeout)
-    if result.returncode:raise RuntimeError('Isolated runtime command refused; raw output withheld')
+    if result.returncode:
+        # Fixture diagnostics contain only exception types and code locations.
+        lines=result.stderr.splitlines()
+        try:
+            failure=json.loads(lines[-1])
+            detail=failure.get('exception_type','unknown')
+            if not re.fullmatch('[A-Za-z]{1,64}',detail):detail='unknown'
+            frames=failure.get('frames',[])
+            locations=','.join(x for x in frames if re.fullmatch('[0-9]+:[A-Za-z_<>]{1,64}',x))
+        except (ValueError,IndexError,AttributeError,TypeError):detail='unknown';locations=''
+        raise RuntimeError('Isolated runtime command refused: '+detail+' '+locations)
     return result.stdout.strip()
 
 
