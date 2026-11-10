@@ -6,7 +6,9 @@ format-only plus a paid ticket. They do not hop here.
 
 from __future__ import annotations
 
-from controlplane_identity.security.tenant_session_jwt import is_smoke_session
+import os
+
+from controlplane_identity.security.tenant_session_jwt import ISSUER, SPANOPTICON_AUTH, is_smoke_session
 
 import uuid
 
@@ -30,6 +32,26 @@ def mint_allowed(
     groups: list[str] | None,
 ) -> bool:
     return evaluate_portal_controls(roles, groups).can_mint_keys
+
+
+def network_attestation_key_allowed(claims, tenant_id, owner_sub, purpose, scopes) -> bool:
+    """Allow the configured tenant's verified network admin to manage its own relay key."""
+    if not isinstance(claims, dict) or is_smoke_session(claims) or not owner_sub:
+        return False
+    return (
+        os.environ.get("API_KEYS_ORACLES_TENANT_ID") == str(tenant_id)
+        and claims.get("iss") == ISSUER
+        and claims.get("spanopticon_auth") == SPANOPTICON_AUTH
+        and claims.get("scope_kind") == "network"
+        and claims.get("scope_version") == 1
+        and claims.get("network_id") == "s3r.ch"
+        and claims.get("organization_id") is None
+        and claims.get("tenant_id") == str(tenant_id)
+        and claims.get("sub") == owner_sub
+        and claims.get("realm_access") == {"roles": ["network:admin"]}
+        and purpose == "service"
+        and scopes == ["oracles:attest"]
+    )
 
 
 def smoke_may_mint(claims: dict | None, purpose: str, scopes: list | None) -> bool:

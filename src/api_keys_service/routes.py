@@ -22,6 +22,7 @@ from api_keys_service.allowlist import (
     MINT_REFUSED,
     actor_controls,
     is_smoke_session,
+    network_attestation_key_allowed,
     smoke_may_mint,
     smoke_owns_key,
 )
@@ -123,7 +124,9 @@ async def create_api_key(
     if body.purpose == "ir":
         if not controls.can_use_ir_door:
             raise HTTPException(status_code=403, detail=IR_MINT_REFUSED)
-    elif not controls.can_mint_keys:
+    elif not controls.can_mint_keys and not network_attestation_key_allowed(
+        claims, tid, getattr(user, "sub", None), body.purpose, body.scopes
+    ):
         raise HTTPException(status_code=403, detail=MINT_REFUSED)
 
     await require_owner_open(session, tid, str(user.sub))
@@ -211,7 +214,11 @@ async def _key_for_mutation(
             not user.sub or getattr(row, "created_by_sub", None) != str(user.sub)
         ):
             raise HTTPException(status_code=404, detail="API key not found")
-    elif purpose not in ("renter", "service") or not controls.can_mint_keys:
+    elif purpose not in ("renter", "service") or not (
+        controls.can_mint_keys or network_attestation_key_allowed(
+            claims, tenant_id, row.created_by_sub, purpose, row.scopes
+        )
+    ):
         raise HTTPException(status_code=403, detail=MINT_REFUSED)
     return row
 
