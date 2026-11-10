@@ -4,7 +4,7 @@ import uuid
 from sqlalchemy import create_engine,text
 from sqlalchemy.orm import Session
 from controlplane_db.migrations import upgrade
-from controlplane_db.models import Tenant
+from controlplane_db.models import Tenant,Group,Role
 
 def bootstrap():
     url='postgresql+psycopg://postgres:'+os.environ['POSTGRES_PASSWORD']+'@127.0.0.1:5432/postgres'
@@ -20,6 +20,11 @@ def bootstrap():
     with Session(engine) as session:
         session.add_all([Tenant(id=uuid.UUID(os.environ[name]),name='isolated-api-key-runtime-'+os.environ[name],is_active=True)
                          for name in ('FIXTURE_TENANT','FIXTURE_OTHER_TENANT')])
+        session.commit()
+        for name in ('FIXTURE_TENANT','FIXTURE_OTHER_TENANT'):
+            role=Role(tenant_id=uuid.UUID(os.environ[name]),name='runtime-rls-probe',permissions=[])
+            session.add(role);session.flush()
+            session.add(Group(tenant_id=uuid.UUID(os.environ[name]),name='runtime-rls-probe',role_id=role.id))
         session.commit()
     engine.dispose()
     print('Disposable owner schema and runtime role ready')

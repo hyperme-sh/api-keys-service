@@ -11,7 +11,11 @@ import uuid
 
 import httpx
 from sqlalchemy import create_engine,text
+from controlplane_api.config import settings
+from controlplane_identity.configuration import configure_identity
 from controlplane_identity.api_keys_client import validate_api_key_remote
+
+configure_identity(settings)
 from controlplane_identity.security.tenant_session_jwt import mint_tenant_session_jwt
 
 TENANT=uuid.UUID(os.environ['FIXTURE_TENANT']);OTHER=uuid.UUID(os.environ['FIXTURE_OTHER_TENANT'])
@@ -68,18 +72,24 @@ def check():
             def mint(purpose='renter'):
                 response=client.post('/api/v1/api-keys',headers=headers(role='ir' if purpose=='ir' else 'renter'),
                                      json={'name':'isolated-runtime','purpose':purpose,'scopes':[]})
-                assert response.status_code==201,'Runtime mint refused: '+str(response.status_code)
+                state['failure_status']=response.status_code
+                assert response.status_code==201,'Runtime mint refused'
                 return response.json()
             stage='mint-renter';renter=mint();stage='mint-ir';ir=mint('ir')
             async def validate(key,tenant=TENANT):
                 return await validate_api_key_remote(base_url=BASE,api_key=key,tenant_id=tenant)
-            stage='rls-row-visibility'
+            stage='rls-unscoped-visibility'
             with engine.connect() as connection:
-                assert connection.scalar(text('SELECT count(*) FROM api_keys')) == 0
+                assert connection.scalar(text('SELECT count(*) FROM groups')) == 0
+                stage='rls-owner-visibility'
                 connection.execute(text("SELECT set_config('app.current_tenant_id', :tenant, true)"), {'tenant':str(TENANT)})
-                assert connection.scalar(text('SELECT count(*) FROM api_keys')) == 2
+                assert connection.scalar(text('SELECT count(*) FROM groups')) == 1
+                stage='rls-other-visibility'
                 connection.execute(text("SELECT set_config('app.current_tenant_id', :tenant, true)"), {'tenant':str(OTHER)})
-                assert connection.scalar(text('SELECT count(*) FROM api_keys')) == 0
+                assert connection.scalar(text('SELECT count(*) FROM groups')) == 1
+                assert connection.scalar(text("SELECT count(*) FROM groups WHERE tenant_id=:tenant"),{'tenant':str(TENANT)}) == 0
+                # Keys use explicit owner predicates; do not invent a fixture-only policy.
+                assert connection.scalar(text("SELECT relrowsecurity FROM pg_class WHERE oid='api_keys'::regclass")) is False
             stage='sdk-validation' 
             assert asyncio.run(validate(renter['api_key']))['key_id']==renter['id']
             assert asyncio.run(validate(renter['api_key'],OTHER)) is None
@@ -107,9 +117,9 @@ def check():
             expected=hashlib.sha256(ir['api_key'].encode()).hexdigest()
             assert ('/api/v1/hypermesh/internal/ir-key-fingerprints/revoke',expected) in state['calls']
             assert ('/api/v1/hypermesh/internal/renter-key-fingerprints/revoke',expected) in state['calls']
-        return {'actual_http':True,'runtime_non_superuser':True,'rls_enforced':True,
+        return {'actual_http':True,'runtime_non_superuser':True,'membership_rls_enforced':True,'api_keys_rls_enabled':False,
                 'sdk_validation':True,'tenant_isolation':True,'purpose_ownership':True,
-                'fingerprint_acknowledgement':True,'touch_tenant_binding':True,'live_keys_used':False}
+                'fingerprint_acknowledgement':True,'touch_with_tenant_context':True,'live_keys_used':False}
     finally:
         plane.shutdown();plane.server_close();worker.join(timeout=5)
 
@@ -118,5 +128,5 @@ if __name__=='__main__':
     try:print(json.dumps(check(),sort_keys=True))
     except Exception as error:
         import sys
-        print(json.dumps({'failure_stage':stage,'exception_type':type(error).__name__}),file=sys.stderr)
+        print(json.dumps({'failure_stage':stage,'exception_type':type(error).__name__,'http_status':state.get('failure_status')}),file=sys.stderr)
         raise SystemExit(1) from None

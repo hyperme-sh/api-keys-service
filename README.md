@@ -180,7 +180,7 @@ schema under a non-superuser, non-RLS-bypassing role. The checked-in lifecycle
 (`scripts/qualify_runtime.py` and `scripts/runtime/`) owns random container names,
 publishes no host ports and shares only a network-none container's loopback.
 A synthetic fingerprint owner runs inside that namespace. HTTP checks cover mint,
-SDK validation, tenant isolation, actual SQL row visibility, key-use callbacks,
+SDK validation, tenant isolation, membership SQL row visibility, key-use callbacks,
 IR ownership and failed/successful fingerprint acknowledgements. Generated keys,
 JWTs and passwords stay in memory; containers and anonymous volumes are removed.
 This is isolated qualification, not shared TEST deployment or live key acceptance.
@@ -200,3 +200,11 @@ rm -rf "$context"
 Use a clean checkout so the reported revision identifies the qualified source.
 Running TEST services follow the moving test channel; image digests in receipts
 identify tested bytes and do not pin service deployments.
+
+The pinned schema applies RLS to directory membership tables. `api_keys` itself
+has no RLS policy: its public operations and remote validation use explicit tenant
+predicates, while authorized account inventory discovers an exact subject across
+tenants. The probe reports this distinction instead of installing a fixture-only
+policy or claiming every table has RLS. The internal touch callback authenticates
+the service token and addresses an opaque key ID; its tenant header carries caller
+context but is not an additional owner authorization check.

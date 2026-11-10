@@ -82,9 +82,10 @@ def qualify(image):
             try:
                 failure=json.loads(result.stderr)
                 stage=failure.get('failure_stage','unknown')
-            except (ValueError,AttributeError):stage='unknown'
+                status=failure.get('http_status')
+            except (ValueError,AttributeError):stage='unknown';status=None
             if not re.fullmatch('[a-z-]{1,64}',stage):stage='unknown'
-            raise RuntimeError('Isolated runtime HTTP contract refused at '+stage)
+            raise RuntimeError('Isolated runtime HTTP contract refused at '+stage+' (HTTP '+str(status if isinstance(status,int) else 'unknown')+')')
         observed=json.loads(result.stdout)
     finally:
         for name in reversed(owned):
