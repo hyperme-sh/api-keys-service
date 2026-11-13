@@ -2,7 +2,7 @@
 
 This component's recorded release line is **0.1** (`release-policy.json`). The package version is **0.1.0** in `pyproject.toml`. A patch on that line keeps the accepted API contract. Channel behavior, artifact retention, and who publishes are described in [releasing.md](releasing.md).
 
-`release-policy.json` names the repository, the component, the line, and the version file. Version alignment of the declared package files is checked by `.github/workflows/version-policy.yml`. Release admission runs on tag pushes and on a manual request (`.github/workflows/release-admission.yml` and `.github/workflows/release.yml`), using the pinned Spanopticon component workflow at line `0.1`. A configuration-only result is not a compatibility result.
+`release-policy.json` names the repository, the component, the line, and the version file. Version alignment of the declared package files is checked by `.github/workflows/version-policy.yml`. Release admission runs on tag pushes and on a manual request (`.github/workflows/release-admission.yml` and `.github/workflows/release-admission.yml`), using the pinned Spanopticon component workflow at line `0.1`. A configuration-only result is not a compatibility result.
 
 Before attempting a release:
 
