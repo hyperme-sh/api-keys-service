@@ -39,7 +39,9 @@ fi
 .venv/bin/python scripts/verify_preparation_environment.py "$PWD"
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
-uv run --frozen "${run_options[@]}" pytest tests integration --junitxml="$scratch/source.xml"
+test_paths=(tests)
+if [[ "${API_KEYS_NIGHTLY:-0}" == 1 ]]; then test_paths+=(integration); fi
+uv run --frozen "${run_options[@]}" pytest "${test_paths[@]}" --junitxml="$scratch/source.xml"
 .venv/bin/python -m pytest -q tests_tools
 uv build --out-dir "$scratch/dist"
 uv run --frozen "${run_options[@]}" python scripts/verify_wheel.py "$scratch/dist"
@@ -53,7 +55,7 @@ uv pip uninstall --python "$scratch/venv/bin/python" auth-service controlplane-c
 uv pip install --python "$scratch/venv/bin/python" --constraint "$scratch/requirements.txt" "$scratch"/dist/*.whl
 fi
 cp -R tests integration "$scratch/"
-(cd "$scratch" && "$scratch/venv/bin/python" -I -m pytest -c /dev/null -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function tests integration --junitxml="$scratch/wheel.xml")
+(cd "$scratch" && "$scratch/venv/bin/python" -I -m pytest -c /dev/null -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function "${test_paths[@]}" --junitxml="$scratch/wheel.xml")
 # Rebuild from the sdist; a checkout must not supply omitted package files.
 uv run --frozen "${run_options[@]}" python - "$scratch" <<'PY'
 import pathlib, sys, tarfile
@@ -64,7 +66,7 @@ PY
 uv build --wheel "$scratch"/sdist/* --out-dir "$scratch/rebuilt"
 uv run --frozen "${run_options[@]}" python scripts/verify_wheel.py "$scratch/rebuilt"
 uv pip install --no-config --python "$scratch/venv/bin/python" --no-deps --reinstall "$scratch"/rebuilt/*.whl
-(cd "$scratch" && "$scratch/venv/bin/python" -I -m pytest -c /dev/null -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function tests integration --junitxml="$scratch/sdist.xml")
+(cd "$scratch" && "$scratch/venv/bin/python" -I -m pytest -c /dev/null -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function "${test_paths[@]}" --junitxml="$scratch/sdist.xml")
 
 python3 scripts/verify-test-results.py "$scratch/source.xml" "$scratch/wheel.xml" "$scratch/sdist.xml"
 
@@ -77,4 +79,11 @@ fi
 if [[ -n "${PREPARATION_EVIDENCE_DIR:-}" ]]; then
   python3 scripts/export_release_contract.py "$scratch"/dist/*.whl --output "$PREPARATION_EVIDENCE_DIR"
   cp "$scratch/source.xml" "$scratch/wheel.xml" "$scratch/sdist.xml" "$PREPARATION_EVIDENCE_DIR/"
+fi
+
+if [[ -n "${TEST_EVIDENCE_DIR:-}" ]]; then
+  mkdir -p "$TEST_EVIDENCE_DIR"
+  cp "$scratch/source.xml" "$TEST_EVIDENCE_DIR/api-keys-source.xml"
+  cp "$scratch/wheel.xml" "$TEST_EVIDENCE_DIR/api-keys-wheel.xml"
+  cp "$scratch/sdist.xml" "$TEST_EVIDENCE_DIR/api-keys-sdist.xml"
 fi

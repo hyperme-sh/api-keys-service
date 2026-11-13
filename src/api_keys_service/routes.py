@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.common.internal_token import internal_token_matches
+from api_keys_service.internal_auth import caller_token_matches
 from controlplane_api.config import settings
 from api.infrastructure.persistence.db_session import get_db_session
 from api.infrastructure.persistence.tenant_guc import set_current_tenant_id_guc
@@ -321,7 +321,7 @@ async def internal_touch(
 ) -> None:
     """Stamp last_used_at. The gateway throttles this to one write per minute."""
 
-    if not internal_token_matches(x_internal_token, settings.usable_api_keys_internal_token()):
+    if not caller_token_matches(x_internal_token, settings):
         raise HTTPException(status_code=401, detail="Invalid internal token")
     statement = select(ApiKey).where(ApiKey.id == body.key_id)
     if authority.enabled() or isinstance(x_tenant_id,str):
@@ -343,7 +343,7 @@ async def internal_validate(
     x_internal_token: str | None = Header(None, alias="X-Internal-Token"),
     session: AsyncSession = Depends(get_db_session),
 ) -> InternalValidateResponse:
-    if not internal_token_matches(x_internal_token, settings.usable_api_keys_internal_token()):
+    if not caller_token_matches(x_internal_token, settings):
         raise HTTPException(status_code=401, detail="Invalid internal token")
 
     raw = body.api_key.strip()
