@@ -6,7 +6,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import zipfile
 
 from verify_dependency_fixtures import verify
 
@@ -30,8 +29,6 @@ def prepare(directory):
     subprocess.run(['uv','run','--isolated','--no-project','--python','3.13','--with','pip',
                     'python','-m','pip','wheel','--no-deps','-r',str(target),'-w',str(wheelhouse)],check=True)
     for dependency in dependencies:shutil.copyfile(dependency,wheelhouse/dependency.name)
-    with zipfile.ZipFile(directory/'tested-dist.zip','x') as archive:
-        for path in sorted([*directory.glob('*.whl'),*directory.glob('*.tar.gz')]):archive.write(path,path.name)
 
 
 if __name__=='__main__':
