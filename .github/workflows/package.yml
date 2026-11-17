@@ -78,11 +78,9 @@ jobs:
       - name: Qualify registry runtime from the tested distribution
         run: |
           set -euo pipefail
-          cd "$RELEASE_ARTIFACT_DIR"
-          python3 -m zipfile -c tested-dist.zip *.whl *.tar.gz
-          cd "$GITHUB_WORKSPACE"
           source="api-keys-ci:$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           docker build -f Dockerfile --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$source" "$RELEASE_ARTIFACT_DIR"
+          python3 scripts/check_runtime_layers.py --image "$source"
           python3 scripts/qualify_runtime.py --image "$source" --ownership-file "$RUNNER_TEMP/api-keys-runtime-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.owner"
       - name: Publish qualified runtime to GHCR
         id: registry

@@ -245,3 +245,14 @@ purpose to Gateway, which limits model discovery, paid ticket use and IR receipt
 history to that scope. Existing unbound renter credentials are not upgraded into
 organization authority. Strict fingerprint publication must be acknowledged
 before a new organization key commits; a failed publication rolls back the key.
+
+## Runtime distribution boundary
+
+The final image contains the installed runtime, not the owner source archive or
+`tested-dist.zip`. Owner wheels and dependency wheelhouses are build-stage inputs;
+source/wheel unit validation stays in CI. Both existing CI image build paths
+inspect every final-image layer for retained owner bundles and builder inputs,
+including files hidden by a later deletion. The temporary image tar is removed
+within the job and is not uploaded. This targeted check does not claim a general
+secret or dependency-license audit. GHCR moving TEST publication and runtime
+authorization are unchanged. No new collection or provisioning is enabled.
