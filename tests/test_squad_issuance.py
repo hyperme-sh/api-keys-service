@@ -1,3 +1,4 @@
+import json
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -70,3 +71,20 @@ async def test_reuses_only_the_existing_matching_credential(monkeypatch):
     with pytest.raises(HTTPException, match="operation retired"):
         await squad.reconcile(db, configured, credential)
     db.add.assert_not_called()
+
+
+
+def test_test_owner_can_verify_with_its_configured_issuer_key(monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwk = json.loads(squad.jwt.algorithms.RSAAlgorithm.to_jwk(private.public_key()))
+    jwk.update(kid="fixture", use="sig", alg="RS256")
+    monkeypatch.setenv("API_KEYS_SQUAD_TEST_ISSUER_JWKS", json.dumps({"keys": [jwk]}))
+    token = squad.jwt.encode({"sub": "fixture"}, private, algorithm="RS256", headers={"kid": "fixture"})
+    key = squad.deployment_signing_key(token, binding())
+    assert squad.jwt.decode(token, key, algorithms=["RS256"]) == {"sub": "fixture"}
+    remote = Mock()
+    monkeypatch.setattr(squad, "_github_keys", remote)
+    squad.deployment_signing_key(token, binding("production"))
+    remote.get_signing_key_from_jwt.assert_called_once_with(token)
