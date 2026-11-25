@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from api_keys_service.middleware import ApiKeysDbMiddleware
 from api_keys_service.authority import verify_runtime
 from api_keys_service.routes import router as api_keys_router
+from api_keys_service.squad_issuance import router as squad_issuance_router
 
 
 def create_app() -> FastAPI:
@@ -59,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(version_router)
     app.include_router(api_keys_router, prefix="/api/v1")
+    app.include_router(squad_issuance_router, prefix="/api/v1")
     from api_keys_service.account_lifecycle import router as lifecycle_router
     app.include_router(lifecycle_router, prefix="/api/v1")
     add_optional_service_cors(app, env_var="API_KEYS_SERVICE_CORS_ORIGINS")
