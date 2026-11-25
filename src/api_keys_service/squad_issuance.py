@@ -9,9 +9,10 @@ import re
 import uuid
 
 import jwt
+from jwt.exceptions import PyJWKClientConnectionError
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, SecretStr
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -138,16 +139,6 @@ class SquadCandidate(BaseModel):
 
     credential: SecretStr | None = None
 
-    @field_validator("credential")
-    @classmethod
-    def bounded_credential(cls, value):
-        if value is not None and not re.fullmatch(
-            r"[a-f0-9]{16}\.[A-Za-z0-9_-]{43}", value.get_secret_value()
-        ):
-            raise ValueError("invalid Squad candidate format")
-        return value
-
-
 def verify_deployment_token(token: str, binding: SquadBinding) -> None:
     issuer = "https://token.actions.githubusercontent.com"
     try:
@@ -157,7 +148,7 @@ def verify_deployment_token(token: str, binding: SquadBinding) -> None:
             audience=f"spanopticon:squad-statement-issuance:{binding.environment}",
             options={"require": ["exp", "iat", "nbf", "iss", "aud", "sub"], "strict_aud": True},
         )
-    except jwt.PyJWKClientConnectionError:
+    except PyJWKClientConnectionError:
         raise HTTPException(503, "Squad issuer verification unavailable") from None
     except jwt.PyJWTError:
         raise HTTPException(401, "Squad issuer token refused") from None
@@ -185,5 +176,7 @@ async def reconcile_squad_credential(
         raise HTTPException(401, "Squad issuer token required")
     await asyncio.to_thread(verify_deployment_token, authorization[7:], binding)
     credential = candidate.credential.get_secret_value() if candidate.credential is not None else None
+    if credential is not None and not re.fullmatch(r"[a-f0-9]{16}\.[A-Za-z0-9_-]{43}", credential):
+        raise HTTPException(400, "Squad candidate format refused")
     result = await reconcile(session, binding, credential)
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
