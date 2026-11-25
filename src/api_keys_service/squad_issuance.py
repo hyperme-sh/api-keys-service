@@ -139,10 +139,29 @@ class SquadCandidate(BaseModel):
 
     credential: SecretStr | None = None
 
+def deployment_signing_key(token: str, binding: SquadBinding):
+    # The trusted TEST controller can supply the issuer's public JWKS in
+    # process configuration. The request never controls the trust store.
+    configured = os.environ.get("API_KEYS_SQUAD_TEST_ISSUER_JWKS")
+    if binding.environment != "test" or configured is None:
+        return _github_keys.get_signing_key_from_jwt(token).key
+    kid = jwt.get_unverified_header(token).get("kid")
+    try:
+        entries = json.loads(configured)["keys"]
+        matches = [key for key in entries if key.get("kid") == kid
+                   and key.get("kty") == "RSA" and key.get("use") == "sig"
+                   and key.get("alg", "RS256") == "RS256"]
+        if not isinstance(kid, str) or not kid or len(matches) != 1:
+            raise jwt.InvalidTokenError()
+        return jwt.PyJWK.from_dict(matches[0], algorithm="RS256").key
+    except (ValueError, TypeError, KeyError, AttributeError):
+        raise HTTPException(503, "Squad issuer verification unavailable") from None
+
+
 def verify_deployment_token(token: str, binding: SquadBinding) -> None:
     issuer = "https://token.actions.githubusercontent.com"
     try:
-        key = _github_keys.get_signing_key_from_jwt(token).key
+        key = deployment_signing_key(token, binding)
         claims = jwt.decode(
             token, key, algorithms=["RS256"], issuer=issuer,
             audience=f"spanopticon:squad-statement-issuance:{binding.environment}",
