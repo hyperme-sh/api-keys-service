@@ -97,13 +97,14 @@ async def reconcile(
     result = await session.execute(select(ApiKey).where(
         ApiKey.tenant_id == binding.tenant,
         ApiKey.name == binding.name,
-        ApiKey.revoked_at.is_(None),
     ).limit(2))
     rows = list(result.scalars())
     if len(rows) > 1:
         raise HTTPException(409, "Squad credential inventory ambiguous")
     if rows:
         row = rows[0]
+        if row.revoked_at is not None:
+            raise HTTPException(409, "Squad credential operation retired")
         owner = await authority.key_binding(session, row)
         if (row.created_by_sub != binding.subject or row.purpose != "service"
                 or tuple(row.scopes or ()) != SCOPES or not owner

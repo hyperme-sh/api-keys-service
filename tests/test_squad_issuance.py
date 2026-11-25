@@ -46,7 +46,7 @@ async def test_reuses_only_the_existing_matching_credential(monkeypatch):
     configured = binding()
     row = SimpleNamespace(
         id=uuid.UUID(int=3), created_by_sub=configured.subject,
-        purpose="service", scopes=squad.SCOPES, key_prefix="a" * 16, secret_hash="fixture",
+        purpose="service", scopes=squad.SCOPES, revoked_at=None, key_prefix="a" * 16, secret_hash="fixture",
     )
     db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalars=lambda: [row])), add=Mock())
     authorize = AsyncMock()
@@ -65,5 +65,8 @@ async def test_reuses_only_the_existing_matching_credential(monkeypatch):
     assert authorize.await_args.kwargs == {"purpose": "service", "scopes": squad.SCOPES}
     verify.return_value = False
     with pytest.raises(HTTPException, match="credential value differs"):
+        await squad.reconcile(db, configured, credential)
+    row.revoked_at = object()
+    with pytest.raises(HTTPException, match="operation retired"):
         await squad.reconcile(db, configured, credential)
     db.add.assert_not_called()
