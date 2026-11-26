@@ -88,3 +88,28 @@ def test_test_owner_can_verify_with_its_configured_issuer_key(monkeypatch):
     monkeypatch.setattr(squad, "_github_keys", remote)
     squad.deployment_signing_key(token, binding("production"))
     remote.get_signing_key_from_jwt.assert_called_once_with(token)
+
+
+def test_contacts_requires_its_own_test_tenant_and_audience(monkeypatch, claims):
+    monkeypatch.setattr(squad.authority, "enabled", lambda: True)
+    config = {
+        "environment": "test", "tenant": str(squad.CONTACTS_TENANT),
+        "subject": binding().subject, "workflow_ref": binding().workflow_ref,
+        "repository_id": "123", "owner_id": "456", "operation": "a" * 32,
+    }
+    monkeypatch.setenv("API_KEYS_SQUAD_DEPLOYMENT_BINDING", json.dumps(config))
+    with pytest.raises(HTTPException) as absent:
+        squad.configured_binding(contacts=True)
+    assert absent.value.status_code == 404
+    monkeypatch.setenv("API_KEYS_CONTACTS_TEST_DEPLOYMENT_BINDING", json.dumps(config))
+    contacts = squad.configured_binding(contacts=True)
+    assert contacts.scopes == ("acl:contacts:read", "acl:contacts:write")
+    assert contacts.name != squad.configured_binding().name
+    with pytest.raises(HTTPException, match="deployment identity refused"):
+        squad.require_deployment_claims(claims, contacts)
+    squad.require_deployment_claims({**claims, "aud": contacts.audience}, contacts)
+    for invalid in ({"environment": "production"}, {"tenant": str(uuid.UUID(int=1))}):
+        monkeypatch.setenv("API_KEYS_CONTACTS_TEST_DEPLOYMENT_BINDING", json.dumps({**config, **invalid}))
+        with pytest.raises(HTTPException) as refused:
+            squad.configured_binding(contacts=True)
+        assert refused.value.status_code == 503

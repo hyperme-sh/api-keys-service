@@ -1,4 +1,4 @@
-"""Reconcile exactly one Squad statement-source credential under deployment authority."""
+"""Reconcile scoped s3r.ch service credentials under deployment authority."""
 
 import asyncio
 from dataclasses import dataclass
@@ -25,6 +25,8 @@ from controlplane_db.models import ApiKey
 
 
 SCOPES = ("acl:statements:read", "acl:statements:write")
+CONTACTS_SCOPES = ("acl:contacts:read", "acl:contacts:write")
+CONTACTS_TENANT = uuid.UUID("afee9b29-1706-5590-bbbf-e58df8945ac0")
 
 
 @dataclass(frozen=True)
@@ -36,21 +38,34 @@ class SquadBinding:
     repository_id: str
     owner_id: str
     operation: str
+    contacts: bool = False
+
+    @property
+    def scopes(self) -> tuple[str, ...]:
+        return CONTACTS_SCOPES if self.contacts else SCOPES
+
+    @property
+    def audience(self) -> str:
+        purpose = "contacts" if self.contacts else "squad-statement"
+        return f"spanopticon:{purpose}-issuance:{self.environment}"
 
     @property
     def name(self) -> str:
         plane = "test" if self.environment == "test" else "prod"
-        return f"s3rch-{plane}-squad-statement-source-key-{self.operation}"
+        purpose = "contacts" if self.contacts else "squad-statement-source"
+        return f"s3rch-{plane}-{purpose}-key-{self.operation}"
 
 
-def configured_binding() -> SquadBinding:
-    raw = os.environ.get("API_KEYS_SQUAD_DEPLOYMENT_BINDING")
+def configured_binding(*, contacts: bool = False) -> SquadBinding:
+    setting = "API_KEYS_CONTACTS_TEST_DEPLOYMENT_BINDING" if contacts else "API_KEYS_SQUAD_DEPLOYMENT_BINDING"
+    raw = os.environ.get(setting)
     if raw is None or not authority.enabled():
         raise HTTPException(404, "Squad deployment issuance unavailable")
     try:
         value = json.loads(raw)
-        binding = SquadBinding(**{**value, "tenant": uuid.UUID(value["tenant"])})
-        if (binding.environment not in {"test", "production"}
+        binding = SquadBinding(**{**value, "tenant": uuid.UUID(value["tenant"])}, contacts=contacts)
+        if ((contacts and (binding.environment != "test" or binding.tenant != CONTACTS_TENANT))
+                or binding.environment not in {"test", "production"}
                 or not re.fullmatch(r"FyberLabs/infra/\.github/workflows/[a-z0-9-]+\.yml@refs/heads/main",
                                     binding.workflow_ref)
                 or not all(re.fullmatch(r"[1-9][0-9]{0,19}", item)
@@ -65,7 +80,7 @@ def configured_binding() -> SquadBinding:
 
 def require_deployment_claims(claims: dict, binding: SquadBinding) -> None:
     expected = {
-        "aud": f"spanopticon:squad-statement-issuance:{binding.environment}",
+        "aud": binding.audience,
         "repository": "FyberLabs/infra",
         "repository_id": binding.repository_id,
         "repository_owner_id": binding.owner_id,
@@ -87,7 +102,7 @@ async def reconcile(
         "tenant_id": binding.tenant, "organization_id": None, "network_id": "s3r.ch",
         "scope_kind": "network", "owner_sub": binding.subject,
     })
-    await authority.authorize(selection, "mint", purpose="service", scopes=SCOPES)
+    await authority.authorize(selection, "mint", purpose="service", scopes=binding.scopes)
     await require_owner_open(session, binding.tenant, binding.subject)
 
     # Serialize even when there is no candidate row to lock yet.
@@ -108,7 +123,7 @@ async def reconcile(
             raise HTTPException(409, "Squad credential operation retired")
         owner = await authority.key_binding(session, row)
         if (row.created_by_sub != binding.subject or row.purpose != "service"
-                or tuple(row.scopes or ()) != SCOPES or not owner
+                or tuple(row.scopes or ()) != binding.scopes or not owner
                 or owner["network_id"] != "s3r.ch" or owner["scope_kind"] != "network"
                 or owner["organization_id"] is not None):
             raise HTTPException(409, "Squad credential ownership differs")
@@ -122,7 +137,7 @@ async def reconcile(
 
     prefix, secret = credential.split(".", 1)
     row = ApiKey(tenant_id=binding.tenant, key_prefix=prefix, secret_hash=hash_secret(secret),
-                 name=binding.name, scopes=list(SCOPES), created_by_sub=binding.subject,
+                 name=binding.name, scopes=list(binding.scopes), created_by_sub=binding.subject,
                  purpose="service", key_fingerprint=renter_key_fingerprint(credential))
     session.add(row)
     try:
@@ -164,7 +179,7 @@ def verify_deployment_token(token: str, binding: SquadBinding) -> None:
         key = deployment_signing_key(token, binding)
         claims = jwt.decode(
             token, key, algorithms=["RS256"], issuer=issuer,
-            audience=f"spanopticon:squad-statement-issuance:{binding.environment}",
+            audience=binding.audience,
             options={"require": ["exp", "iat", "nbf", "iss", "aud", "sub"], "strict_aud": True},
         )
     except PyJWKClientConnectionError:
@@ -187,7 +202,22 @@ async def reconcile_squad_credential(
     authorization: str | None = Header(None),
     session: AsyncSession = Depends(get_db_session),
 ):
-    binding = configured_binding()
+    return await reconcile_deployment_credential(request, candidate, authorization, session, configured_binding())
+
+
+@router.put("/internal/contacts-test-credential", include_in_schema=False)
+async def reconcile_contacts_credential(
+    request: Request,
+    candidate: SquadCandidate,
+    authorization: str | None = Header(None),
+    session: AsyncSession = Depends(get_db_session),
+):
+    return await reconcile_deployment_credential(
+        request, candidate, authorization, session, configured_binding(contacts=True)
+    )
+
+
+async def reconcile_deployment_credential(request, candidate, authorization, session, binding):
     if request.state.tenant_id != binding.tenant:
         raise HTTPException(403, "Squad deployment tenant refused")
     if (authorization is None or len(authorization) > 16384
