@@ -113,3 +113,38 @@ def test_contacts_requires_its_own_test_tenant_and_audience(monkeypatch, claims)
         with pytest.raises(HTTPException) as refused:
             squad.configured_binding(contacts=True)
         assert refused.value.status_code == 503
+
+
+
+def test_contacts_reusable_job_requires_both_exact_workflow_claims(monkeypatch, claims):
+    monkeypatch.setattr(squad.authority, "enabled", lambda: True)
+    config = {
+        "environment": "test", "tenant": str(squad.CONTACTS_TENANT),
+        "subject": binding().subject,
+        "workflow_ref": "FyberLabs/infra/.github/workflows/nightly-integration.yml@refs/heads/main",
+        "job_workflow_ref": "FyberLabs/infra/.github/workflows/nightly-batch.yml@refs/heads/main",
+        "repository_id": "123", "owner_id": "456", "operation": "a" * 32,
+    }
+    setting = "API_KEYS_CONTACTS_TEST_DEPLOYMENT_BINDING"
+    monkeypatch.setenv(setting, json.dumps(config))
+    contacts = squad.configured_binding(contacts=True)
+    expected = {**claims, "aud": contacts.audience, "workflow_ref": config["workflow_ref"],
+                "job_workflow_ref": config["job_workflow_ref"]}
+    squad.require_deployment_claims(expected, contacts)
+    mismatches = [
+        {key: value for key, value in expected.items() if key != "job_workflow_ref"},
+        {**expected, "job_workflow_ref": config["workflow_ref"]},
+        {**expected, "workflow_ref": config["job_workflow_ref"]},
+    ]
+    for mismatch in mismatches:
+        with pytest.raises(HTTPException, match="deployment identity refused"):
+            squad.require_deployment_claims(mismatch, contacts)
+
+    for invalid in (None, config["job_workflow_ref"].replace("heads/main", "tags/test")):
+        monkeypatch.setenv(setting, json.dumps({**config, "job_workflow_ref": invalid}))
+        with pytest.raises(HTTPException, match="deployment binding invalid"):
+            squad.configured_binding(contacts=True)
+
+    monkeypatch.setenv("API_KEYS_SQUAD_DEPLOYMENT_BINDING", json.dumps(config))
+    with pytest.raises(HTTPException, match="deployment binding invalid"):
+        squad.configured_binding()
