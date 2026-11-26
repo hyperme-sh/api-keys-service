@@ -26,6 +26,7 @@ from controlplane_db.models import ApiKey
 
 SCOPES = ("acl:statements:read", "acl:statements:write")
 CONTACTS_SCOPES = ("acl:contacts:read", "acl:contacts:write")
+WORKFLOW_REF = re.compile(r"FyberLabs/infra/\.github/workflows/[a-z0-9-]+\.yml@refs/heads/main")
 CONTACTS_TENANT = uuid.UUID("afee9b29-1706-5590-bbbf-e58df8945ac0")
 
 
@@ -39,6 +40,7 @@ class SquadBinding:
     owner_id: str
     operation: str
     contacts: bool = False
+    job_workflow_ref: str | None = None
 
     @property
     def scopes(self) -> tuple[str, ...]:
@@ -66,8 +68,9 @@ def configured_binding(*, contacts: bool = False) -> SquadBinding:
         binding = SquadBinding(**{**value, "tenant": uuid.UUID(value["tenant"])}, contacts=contacts)
         if ((contacts and (binding.environment != "test" or binding.tenant != CONTACTS_TENANT))
                 or binding.environment not in {"test", "production"}
-                or not re.fullmatch(r"FyberLabs/infra/\.github/workflows/[a-z0-9-]+\.yml@refs/heads/main",
-                                    binding.workflow_ref)
+                or not WORKFLOW_REF.fullmatch(binding.workflow_ref)
+                or ("job_workflow_ref" in value
+                    and (not contacts or not WORKFLOW_REF.fullmatch(binding.job_workflow_ref)))
                 or not all(re.fullmatch(r"[1-9][0-9]{0,19}", item)
                            for item in (binding.repository_id, binding.owner_id))
                 or str(uuid.UUID(binding.subject)) != binding.subject
@@ -91,7 +94,13 @@ def require_deployment_claims(claims: dict, binding: SquadBinding) -> None:
     }
     if any(claims.get(name) != value for name, value in expected.items()):
         raise HTTPException(403, "Squad deployment identity refused")
-    if claims.get("job_workflow_ref", binding.workflow_ref) != binding.workflow_ref:
+    job_ref = binding.job_workflow_ref
+    if job_ref is not None:
+        actual_job_ref = claims.get("job_workflow_ref")
+    else:
+        job_ref = binding.workflow_ref
+        actual_job_ref = claims.get("job_workflow_ref", job_ref)
+    if actual_job_ref != job_ref:
         raise HTTPException(403, "Squad deployment identity refused")
 
 
